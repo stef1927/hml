@@ -23,7 +23,7 @@ def normalize(inData, c1, c2):
 	ret[np.isnan(ret)] = -1
 	return ret
 
-class TrainingSet(object):
+class DataSet(object):
 	
 	def __init__(self, file_name):
 		self.all = list(csv.reader(open(file_name,"rb"), delimiter=','))
@@ -50,7 +50,10 @@ class TrainingSet(object):
 		numPointsTrain = int(self.numPoints*0.8)
 		numPointsValidation = (self.numPoints - numPointsTrain) / 2
 		numPointsTest = numPointsValidation
-		self.wFactor = 1.* self.xs.numPoints / numPointsTest
+		self.wFactor = 1.* self.numPoints / numPointsTest
+
+		print(('Num points training %d, validation %d, testing %d') %
+			  (numPointsTrain, numPointsValidation, numPointsTest))
 
 		self.train = self.xs[randomPermutation[:numPointsTrain]]
 		self.validation = self.xs[randomPermutation[numPointsTrain:numPointsTrain+numPointsValidation]]

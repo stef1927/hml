@@ -16,8 +16,7 @@ from theano_modules.LogisticRegression import LogisticRegression
 from theano_modules.HiddenLayer import HiddenLayer
 from theano_modules.MLP import MLP
 
-def shared_dataset(data_x, data_y, borrow=True):
-	""" Function that loads the dataset into shared variables
+""" Functions that load the dataset into shared variables
 
 	The reason we store our dataset in shared variables is to allow
 	Theano to copy it into the GPU memory (when code is run on GPU).
@@ -26,19 +25,9 @@ def shared_dataset(data_x, data_y, borrow=True):
 	variable) would lead to a large decrease in performance.
 	"""
 
-	if data_y is None:
-        data_y = np.zeros((data_x.shape[0]), dtype=theano.config.floatX)
-
+def shared_dataset(data_x, data_y, borrow=True):
 	shared_x = theano.shared(np.asarray(data_x, dtype=theano.config.floatX), borrow=borrow)
 	shared_y = theano.shared(np.asarray(data_y, dtype=theano.config.floatX), borrow=borrow)
-	
-	# When storing data on the GPU it has to be stored as floats
-	# therefore we will store the labels as ``floatX`` as well
-	# (``shared_y`` does exactly that). But during our computations
-	# we need them as ints (we use labels as index, and if they are
-	# floats it doesn't make sense) therefore instead of returning
-	# ``shared_y`` we will have to cast it to int. This little hack
-	# lets ous get around this issue
 	return shared_x, T.cast(shared_y, 'int32')
 
 """ Calculate the AMS"""
@@ -76,7 +65,8 @@ class Analysis(object):
 
 		rng = np.random.RandomState(1234)
 
-		self.classifier = MLP(rng=rng, input=x, n_in=self.xs.numFeatures, n_hidden=n_hidden, n_out=2)
+		self.classifier = MLP(rng=rng, input=x, n_in=self.xs.numFeatures, 
+							  n_hidden=n_hidden, n_out=2)
 
 		cost = self.classifier.negative_log_likelihood(y) \
 			 + L1_reg * self.classifier.L1 \
@@ -147,19 +137,19 @@ class Analysis(object):
 		test_score = 0.
 		start_time = time.clock()
 
-		epoch = 0
+		self.epoch = 0
 		done_looping = False
 		
-		errorsTrain = np.zeros((n_epochs+1))
+		self.errorsTrain = np.zeros((n_epochs+1))
 		self.errorsValidation = np.zeros((n_epochs+1))    
 
-		while (epoch < n_epochs) and (not done_looping):
-			epoch = epoch + 1
+		while (self.epoch < n_epochs) and (not done_looping):
+			self.epoch = self.epoch + 1
 			for minibatch_index in xrange(n_train_batches):
 
 				minibatch_avg_cost = train_model(minibatch_index)
 				# iteration number
-				iter = (epoch - 1) * n_train_batches + minibatch_index
+				iter = (self.epoch - 1) * n_train_batches + minibatch_index
 
 				if (iter + 1) % validation_frequency == 0:
 					# compute zero-one loss on validation set
@@ -183,15 +173,15 @@ class Analysis(object):
 						best_iter = iter
 
 					print('epoch %i, minibatch %i/%i, patience %i, iter %i, test error %f %%, valid error %f %%' %
-						 (epoch, minibatch_index + 1, n_train_batches, patience, iter, 
+						 (self.epoch, minibatch_index + 1, n_train_batches, patience, iter, 
 						  best_test_loss * 100., best_validation_loss * 100.))     
 
 				if patience <= iter:
 					done_looping = True
 					break
 						
-			self.errorsTrain[epoch] = best_train_loss
-			self.errorsValidation[epoch] = best_validation_loss
+			self.errorsTrain[self.epoch] = best_train_loss
+			self.errorsValidation[self.epoch] = best_validation_loss
 			
 		end_time = time.clock()
 		print(('Optimization complete. Best validation score of %f %% '
@@ -208,18 +198,21 @@ class Analysis(object):
 		ax.set_xlabel('number of epochs')
 		ax.set_ylabel('errors')
 
-		ax.plot(range(epoch), self.errorsTrain[:epoch] * 100, 'b-')
-		ax.plot(range(epoch), self.errorsValidation[:epoch] * 100, 'r-')
+		ax.plot(range(self.epoch), self.errorsTrain[:self.epoch] * 100, 'b-')
+		ax.plot(range(self.epoch), self.errorsValidation[:self.epoch] * 100, 'r-')
 
-		ax.axis([0, epoch, 0, 100])
+		ax.axis([0, self.epoch, 0, 100])
 
 		plt.show()
 
 	def getTestScores(self):
-		return getScores(self, self.xs.test)
+		return self.getScores(self.xs.test)
 
 	def getScores(self, xs):
-		return self.classifier.score(inputs=self.xs)	
+		predict = theano.function(
+			inputs=[self.classifier.input], 
+			outputs=self.classifier.p_y_given_x)
+		return predict(np.asarray(xs, dtype=theano.config.floatX))[:,0]	
 
 	def calculateAMS(self, scores):
 		tIIs = scores.argsort()
@@ -231,18 +224,18 @@ class Analysis(object):
 		threshold = 0.0
 		
 		for tI in range(len(tIIs)):
-		    # don't forget to renormalize the weights to the same sum 
-		    # as in the complete training set
-		    amss[tI] = AMS(max(0,s * self.xs.wFactor),max(0,b * self.xs.wFactor))
-		    # careful with small regions, they fluctuate a lot
-		    if tI < 0.9 * len(tIIs) and amss[tI] > amsMax:
-		        amsMax = amss[tI]
-		        threshold = scores[tIIs[tI]]
-		        #print tI,threshold
-		    if self.xs.sSelectorTest[tIIs[tI]]:
-		        s -= self.xs.weightsTest[tIIs[tI]]
-		    else:
-		        b -= self.xs.weightsTest[tIIs[tI]]
+			# don't forget to renormalize the weights to the same sum 
+			# as in the complete training set
+			amss[tI] = AMS(max(0,s * self.xs.wFactor),max(0,b * self.xs.wFactor))
+			# careful with small regions, they fluctuate a lot
+			if tI < 0.9 * len(tIIs) and amss[tI] > amsMax:
+				amsMax = amss[tI]
+				threshold = scores[tIIs[tI]]
+				#print tI,threshold
+			if self.xs.sSelectorTest[tIIs[tI]]:
+				s -= self.xs.weightsTest[tIIs[tI]]
+			else:
+				b -= self.xs.weightsTest[tIIs[tI]]
 
 		return amss
 
@@ -272,22 +265,22 @@ class Analysis(object):
 		vsScore.set_ylabel('AMS')
 
 		vsScore.plot(scores[tIIs],amss,'b-')
-		vsScore.axis(scores[tIIs[0]], scores[tIIs[-1]] , 0, 4])
+		vsScore.axis([scores[tIIs[0]], scores[tIIs[-1]] , 0, 4])
 
 		plt.show()    
 
 	def computeSubmission(self, xsTest, output_file):	
 		testIds = np.array([int(row[0]) for row in xsTest.all[1:]])
 
-		scores = getScores(xsTest.xs)
+		scores = self.getScores(xsTest.xs)
 
-    	testInversePermutation = scores.argsort()
+		testInversePermutation = scores.argsort()
 		testPermutation = list(testInversePermutation)
 		for tI,tII in zip(range(len(testInversePermutation)), testInversePermutation):
-    		testPermutation[tII] = tI
+			testPermutation[tII] = tI
 
-    	submission = np.array([[str(testIds[tI]),str(testPermutation[tI]+1),
-            's' if scores[tI] >= threshold else 'b'] for tI in range(len(testIds))])
+		submission = np.array([[str(testIds[tI]),str(testPermutation[tI]+1),
+			's' if scores[tI] >= threshold else 'b'] for tI in range(len(testIds))])
 
-    	submission = np.append([['EventId','RankOrder','Class']], submission, axis=0)
-    	np.savetxt(output_file, submission, fmt='%s', delimiter=',')
+		submission = np.append([['EventId','RankOrder','Class']], submission, axis=0)
+		np.savetxt(output_file, submission, fmt='%s', delimiter=',')
