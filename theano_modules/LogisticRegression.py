@@ -10,25 +10,24 @@ import scipy as sci
 import theano
 import theano.tensor as T
 
+""" Initialize the parameters of the logistic regression
+
+    :type input: theano.tensor.TensorType
+    :param input: symbolic variable that describes the input of the
+                  architecture (one minibatch)
+
+    :type n_in: int
+    :param n_in: number of input units, the dimension of the space in
+                 which the datapoints lie
+
+    :type n_out: int
+    :param n_out: number of output units, the dimension of the space in
+                  which the labels lie
+
+"""
 class LogisticRegression(object):
     
     def __init__(self, input, n_in, n_out):
-        """ Initialize the parameters of the logistic regression
-
-        :type input: theano.tensor.TensorType
-        :param input: symbolic variable that describes the input of the
-                      architecture (one minibatch)
-
-        :type n_in: int
-        :param n_in: number of input units, the dimension of the space in
-                     which the datapoints lie
-
-        :type n_out: int
-        :param n_out: number of output units, the dimension of the space in
-                      which the labels lie
-
-        """
-
         # The weights W as a matrix of shape (n_in, n_out)
         self.W = theano.shared(value=np.zeros((n_in, n_out),
                             dtype=theano.config.floatX),
@@ -48,9 +47,8 @@ class LogisticRegression(object):
         # parameters of the model
         self.params = [self.W, self.b]
 
-    #def sigmoid_cost(self, y):    
-    #    return -T.mean(y[T.arange(y.shape[0])] * T.log(self.p_y_given_x[T.arange(y.shape[0])]) +
-    #        (1 - y[T.arange(y.shape[0])]) * T.log(1 - self.p_y_given_x[T.arange(y.shape[0])]))
+        self.score = theano.function(inputs=[x], outputs=self.p_y_given_x)
+        self.classify = theano.function(inputs=[x], outputs=self.y_pred)
     
     def negative_log_likelihood(self, y):
         # y.shape[0] is (symbolically) the number of rows in y, i.e.,
@@ -77,7 +75,3 @@ class LogisticRegression(object):
             return T.mean(T.neq(self.y_pred, y))
         else:
             raise NotImplementedError()
-            
-            
-    def scores(self):
-        return self.p_y_given_x

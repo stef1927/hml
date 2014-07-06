@@ -10,33 +10,32 @@ import scipy as sci
 import theano
 import theano.tensor as T
 
+"""
+    Typical hidden layer of a MLP: units are fully-connected and have
+    sigmoidal activation function. Weight matrix W is of shape (n_in,n_out)
+    and the bias vector b is of shape (n_out,).
+
+    NOTE : The nonlinearity used here is tanh
+
+    Hidden unit activation is given by: tanh(dot(input,W) + b)
+
+    :type rng: np.random.RandomState
+    :param rng: a random number generator used to initialize weights
+
+    :type input: theano.tensor.dmatrix
+    :param input: a symbolic tensor of shape (n_examples, n_in)
+
+    :type n_in: int
+    :param n_in: dimensionality of input
+
+    :type n_out: int
+    :param n_out: number of hidden units
+
+    :type activation: theano.Op or function
+    :param activation: Non linearity to be applied in the hidden layer
+"""
 class HiddenLayer(object):
     def __init__(self, rng, input, n_in, n_out, W=None, b=None, activation=T.tanh):
-        """
-        Typical hidden layer of a MLP: units are fully-connected and have
-        sigmoidal activation function. Weight matrix W is of shape (n_in,n_out)
-        and the bias vector b is of shape (n_out,).
-
-        NOTE : The nonlinearity used here is tanh
-
-        Hidden unit activation is given by: tanh(dot(input,W) + b)
-
-        :type rng: np.random.RandomState
-        :param rng: a random number generator used to initialize weights
-
-        :type input: theano.tensor.dmatrix
-        :param input: a symbolic tensor of shape (n_examples, n_in)
-
-        :type n_in: int
-        :param n_in: dimensionality of input
-
-        :type n_out: int
-        :param n_out: number of hidden units
-
-        :type activation: theano.Op or function
-        :param activation: Non linearity to be applied in the hidden
-                           layer
-        """
         self.input = input
 
         # `W` is initialized with `W_values` which is uniformely sampled
@@ -69,7 +68,6 @@ class HiddenLayer(object):
         self.b = b
 
         lin_output = T.dot(input, self.W) + self.b
-        self.output = (lin_output if activation is None
-                       else activation(lin_output))
-        # parameters of the model
+        self.output = (lin_output if activation is None else activation(lin_output))
+        
         self.params = [self.W, self.b]

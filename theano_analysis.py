@@ -60,7 +60,8 @@ class Analysis(object):
 		self.xs = xs
 
 	""" Train a neural net via stochastic gradient descent """
-	def train(self, learning_rate=0.01, L1_reg=0.00, L2_reg=0.0001, n_epochs=1000, batch_size=20, n_hidden=500):
+	def train(self, learning_rate=0.01, L1_reg=0.00, L2_reg=0.0001, 
+					n_epochs=1000, batch_size=20, n_hidden=500):
 		
 		# compute number of minibatches for training, validation and testing
 		n_train_batches = self.train_set_x.get_value(borrow=True).shape[0] / batch_size
@@ -98,13 +99,7 @@ class Analysis(object):
 				outputs=self.classifier.errors(y),
 				givens={
 					x: self.train_set_x[index * batch_size:(index + 1) * batch_size],
-					y: self.train_set_y[index * batch_size:(index + 1) * batch_size]})
-
-		# classification scores
-		test_score_model = theano.function(inputs=[index],
-				outputs=self.classifier.scores(),
-				givens={x: self.test_set_x[index * batch_size:(index + 1) * batch_size]})
-		
+					y: self.train_set_y[index * batch_size:(index + 1) * batch_size]})	
 			
 		# compute the gradient of cost with respect to theta (sotred in params)
 		# the resulting gradients will be stored in a list gparams
@@ -182,7 +177,6 @@ class Analysis(object):
 						train_losses = [train_error_model(i) for i in xrange(n_valid_batches)]
 						best_train_loss = np.mean(train_losses)
 						
-						self.testScores = [test_score_model(i) for i in xrange(n_valid_batches)]
 						test_losses = [test_error_model(i) for i in xrange(n_test_batches)]
 						
 						best_test_loss = np.mean(test_losses)
@@ -221,30 +215,38 @@ class Analysis(object):
 
 		plt.show()
 
-	def calculateAMS(self):
-		tIIs = self.testScores.argsort()
+	def getTestScores(self):
+		return getScores(self, self.xs.test)
+
+	def getScores(self, xs):
+		return self.classifier.score(inputs=self.xs)	
+
+	def calculateAMS(self, scores):
+		tIIs = scores.argsort()
 
 		s = np.sum(self.xs.weightsTest[self.xs.sSelectorTest])
 		b = np.sum(self.xs.weightsTest[self.xs.bSelectorTest])
-		self.amss = np.empty([len(tIIs)])
+		amss = np.empty([len(tIIs)])
 		amsMax = 0
 		threshold = 0.0
 		
 		for tI in range(len(tIIs)):
 		    # don't forget to renormalize the weights to the same sum 
 		    # as in the complete training set
-		    self.amss[tI] = AMS(max(0,s * self.xs.wFactor),max(0,b * self.xs.wFactor))
+		    amss[tI] = AMS(max(0,s * self.xs.wFactor),max(0,b * self.xs.wFactor))
 		    # careful with small regions, they fluctuate a lot
-		    if tI < 0.9 * len(tIIs) and self.amss[tI] > amsMax:
-		        amsMax = self.amss[tI]
-		        threshold = self.testScores[tIIs[tI]]
+		    if tI < 0.9 * len(tIIs) and amss[tI] > amsMax:
+		        amsMax = amss[tI]
+		        threshold = scores[tIIs[tI]]
 		        #print tI,threshold
 		    if self.xs.sSelectorTest[tIIs[tI]]:
 		        s -= self.xs.weightsTest[tIIs[tI]]
 		    else:
 		        b -= self.xs.weightsTest[tIIs[tI]]
 
-	def plotAMSvsRank(self):
+		return amss
+
+	def plotAMSvsRank(self, amss):
 		fig = plt.figure()
 		fig.suptitle('AMS curves', fontsize=14, fontweight='bold')
 		vsRank = fig.add_subplot(111)
@@ -253,12 +255,14 @@ class Analysis(object):
 		vsRank.set_xlabel('rank')
 		vsRank.set_ylabel('AMS')
 
-		vsRank.plot(self.amss,'b-')
-		vsRank.axis([0,len(self.amss), 0, 4])
+		vsRank.plot(amss,'b-')
+		vsRank.axis([0,len(amss), 0, 4])
 
 		plt.show()
 
-	def plotAMSvsScore(self):
+	def plotAMSvsScore(self, scores, amss):
+		tIIs = scores.argsort()
+
 		fig = plt.figure()
 		fig.suptitle('AMS curves', fontsize=14, fontweight='bold')
 		vsScore = fig.add_subplot(111)
@@ -267,28 +271,23 @@ class Analysis(object):
 		vsScore.set_xlabel('score')
 		vsScore.set_ylabel('AMS')
 
-		vsScore.plot(self.testScores[tIIs],self.amss,'b-')
-		vsScore.axis([self.testScores[tIIs[0]], self.testScores[tIIs[-1]] , 0, 4])
+		vsScore.plot(scores[tIIs],amss,'b-')
+		vsScore.axis(scores[tIIs[0]], scores[tIIs[-1]] , 0, 4])
 
 		plt.show()    
 
 	def computeSubmission(self, xsTest, output_file):	
 		testIds = np.array([int(row[0]) for row in xsTest.all[1:]])
 
-		submission_set_x = shared_dataset(xsTest.xs)
+		scores = getScores(xsTest.xs)
 
-		activation_model = theano.function(inputs=[index],
-			outputs=self.classifier.scores(), givens={x: self.submission_set_x[index]})
-
-		submissionScores = [activation_model(i) for i in xrange(xsTest.numPoints)]
-
-    	testInversePermutation = submissionScores.argsort()
+    	testInversePermutation = scores.argsort()
 		testPermutation = list(testInversePermutation)
 		for tI,tII in zip(range(len(testInversePermutation)), testInversePermutation):
     		testPermutation[tII] = tI
 
     	submission = np.array([[str(testIds[tI]),str(testPermutation[tI]+1),
-            's' if submissionScores[tI] >= threshold else 'b'] for tI in range(len(testIds))])
+            's' if scores[tI] >= threshold else 'b'] for tI in range(len(testIds))])
 
     	submission = np.append([['EventId','RankOrder','Class']], submission, axis=0)
     	np.savetxt(output_file, submission, fmt='%s', delimiter=',')
