@@ -8,8 +8,8 @@ import csv
 import numpy as np
 import scipy as sci
 
-"""Perform feature scaling ((x - min) / (max - min)) * 1000 
-	so that all features are between 0 and 1000, 
+"""Perform feature scaling ((x - min) / (max - min)) * 100 
+	so that all features are between 0 and 100
 	missing values become -1.
 """
 def normalize(inData, c1, c2):
@@ -19,11 +19,11 @@ def normalize(inData, c1, c2):
 	ret_min = np.nanmin(ret,0)
 	ret_max = np.nanmax(ret,0)
 
-	ret = ((ret - ret_min) / (ret_max - ret_min)) * 1000 
+	ret = ((ret - ret_min) / (ret_max - ret_min)) * 100
 	ret[np.isnan(ret)] = -1
 	return ret
 
-class DataSet(object):
+class TrainingSet(object):
 	
 	def __init__(self, file_name):
 		self.all = list(csv.reader(open(file_name,"rb"), delimiter=','))
@@ -33,6 +33,7 @@ class DataSet(object):
 
 		self.xs = normalize(self.all[1:], 1, -2)
 		(self.numPoints, self.numFeatures) = self.xs.shape
+		print "Training Set :", self.xs.shape
 
 	""" Split data set into training, validation and test"""	
 	def split(self): 
@@ -77,3 +78,14 @@ class DataSet(object):
 		self.sumWeightsTrain = np.sum(self.weightsTrain)
 		self.sumSWeightsTrain = np.sum(self.weightsTrain[self.sSelectorTrain])
 		self.sumBWeightsTrain = np.sum(self.weightsTrain[self.bSelectorTrain])	
+
+
+class TestSet(object):
+	
+	def __init__(self, file_name):
+		self.all = list(csv.reader(open(file_name,"rb"), delimiter=','))
+		self.testIds = np.array([int(row[0]) for row in self.all[1:]])
+
+		self.xs = normalize(self.all[1:], 1, 31)
+		(self.numPoints, self.numFeatures) = self.xs.shape
+		print "Test Set :", self.xs.shape

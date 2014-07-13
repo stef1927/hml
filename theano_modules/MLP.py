@@ -56,19 +56,25 @@ class MLP(object):
 									   n_in=n_hidden, n_out=n_hidden,
 									   activation=T.tanh) 
 
+		self.hiddenLayer3 = HiddenLayer(rng=rng, input=self.hiddenLayer2.output,
+									   n_in=n_hidden, n_out=n_hidden,
+									   activation=T.tanh) 
+
 		self.logRegressionLayer = LogisticRegression(
-			input=self.hiddenLayer2.output,
+			input=self.hiddenLayer3.output,
 			n_in=n_hidden,
 			n_out=n_out)
 
 		# L1 norm 
 		self.L1 = abs(self.hiddenLayer1.W).sum() \
 				+ abs(self.hiddenLayer2.W).sum() \
+				+ abs(self.hiddenLayer3.W).sum() \
 				+ abs(self.logRegressionLayer.W).sum()
 
 		# square of L2 norm 
 		self.L2_sqr = (self.hiddenLayer1.W ** 2).sum() \
 					+ (self.hiddenLayer2.W ** 2).sum() \
+					+ (self.hiddenLayer3.W ** 2).sum() \
 					+ (self.logRegressionLayer.W ** 2).sum()
 
 		self.negative_log_likelihood = self.logRegressionLayer.negative_log_likelihood
@@ -79,4 +85,5 @@ class MLP(object):
 
 		self.params = self.hiddenLayer1.params + \
 		              self.hiddenLayer2.params + \
+		              self.hiddenLayer3.params + \
 					  self.logRegressionLayer.params

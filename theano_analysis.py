@@ -212,7 +212,7 @@ class Analysis(object):
 		predict = theano.function(
 			inputs=[self.classifier.input], 
 			outputs=self.classifier.p_y_given_x)
-		return predict(np.asarray(xs, dtype=theano.config.floatX))[:,0]	
+		return predict(np.asarray(xs, dtype=theano.config.floatX))[:,1]	
 
 	def calculateAMS(self, scores):
 		tIIs = scores.argsort()
@@ -221,7 +221,7 @@ class Analysis(object):
 		b = np.sum(self.xs.weightsTest[self.xs.bSelectorTest])
 		amss = np.empty([len(tIIs)])
 		amsMax = 0
-		threshold = 0.0
+		self.threshold = 0.0
 		
 		for tI in range(len(tIIs)):
 			# don't forget to renormalize the weights to the same sum 
@@ -230,8 +230,8 @@ class Analysis(object):
 			# careful with small regions, they fluctuate a lot
 			if tI < 0.9 * len(tIIs) and amss[tI] > amsMax:
 				amsMax = amss[tI]
-				threshold = scores[tIIs[tI]]
-				#print tI,threshold
+				self.threshold = scores[tIIs[tI]]
+				#print tI,self.threshold
 			if self.xs.sSelectorTest[tIIs[tI]]:
 				s -= self.xs.weightsTest[tIIs[tI]]
 			else:
@@ -270,17 +270,34 @@ class Analysis(object):
 		plt.show()    
 
 	def computeSubmission(self, xsTest, output_file):	
-		testIds = np.array([int(row[0]) for row in xsTest.all[1:]])
 
-		scores = self.getScores(xsTest.xs)
+		## We divide in batches to avoid out of memory errors, you can
+		## simply do scores = self.getScores(xsTest.xs) if you have sufficient
+		## memory in your GPU
+		num_batches = 20
+		num_points = xsTest.numPoints / (num_batches * 1.0)
+		scores = np.empty([])
+		for i in range(num_batches):
+			start = i * num_points
+			end = ((i+1) * num_points)
+			print(('Calculating test scores for batch %i, from %i to %i') % 
+				(i, start, end))
+
+			if i == 0:
+				scores = self.getScores(xsTest.xs[start : end,])
+			else:	
+				scores = np.append(scores, self.getScores(xsTest.xs[start : end,]))
+
+		print "Num test scores:", scores.shape
+		print scores
 
 		testInversePermutation = scores.argsort()
 		testPermutation = list(testInversePermutation)
 		for tI,tII in zip(range(len(testInversePermutation)), testInversePermutation):
 			testPermutation[tII] = tI
 
-		submission = np.array([[str(testIds[tI]),str(testPermutation[tI]+1),
-			's' if scores[tI] >= threshold else 'b'] for tI in range(len(testIds))])
+		submission = np.array([[str(xsTest.testIds[tI]),str(testPermutation[tI]+1),
+			's' if scores[tI] >= self.threshold else 'b'] for tI in range(len(xsTest.testIds))])
 
 		submission = np.append([['EventId','RankOrder','Class']], submission, axis=0)
 		np.savetxt(output_file, submission, fmt='%s', delimiter=',')
