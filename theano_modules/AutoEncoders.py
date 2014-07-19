@@ -241,6 +241,10 @@ class SdA(object):
 
 		self.errors = self.logLayer.errors(self.y)
 
+		self.p_y_given_x = self.logLayer.p_y_given_x
+
+		self.input = self.x
+
 	''' Generates a list of functions, each of them implementing one
 		step in trainnig the dA corresponding to the layer with same index.
 		The function will require as input the minibatch index, and to train

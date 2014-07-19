@@ -203,20 +203,21 @@ class Analysis(object):
 		numpy_rng = np.random.RandomState(89677)
 		print '... building the model'
 
-		sda = SdA(numpy_rng=numpy_rng, n_ins=self.xs.numFeatures,
-				  hidden_layers_sizes=[100],
+		self.classifier = SdA(numpy_rng=numpy_rng, n_ins=self.xs.numFeatures,
+				  hidden_layers_sizes=[500, 500, 500],
 				  n_outs=2)
 
 		print '... getting the pretraining functions'
-		pretraining_fns = sda.pretraining_functions(train_set_x=self.train_set_x,
-													batch_size=batch_size)
+		pretraining_fns = \
+			self.classifier.pretraining_functions(train_set_x=self.train_set_x, 
+												   batch_size=batch_size)
 
 		print '... pre-training the model'
 		start_time = time.clock()
 
 		## Pre-train layer-wise
 		corruption_levels = [.1, .2, .3]
-		for i in xrange(sda.n_layers):
+		for i in xrange(self.classifier.n_layers):
 			# go through pretraining epochs
 			for epoch in xrange(pretraining_epochs):
 				# go through the training set
@@ -232,7 +233,7 @@ class Analysis(object):
 
 		print '... getting the finetuning functions'
 		train_fn, train_score_fn, validate_score_fn, test_score_fn = \
-			sda.build_finetune_functions(
+			self.classifier.build_finetune_functions(
 			datasets=self.datasets, batch_size=batch_size, learning_rate=finetune_lr)
 
 		print '... finetunning the model'
@@ -294,7 +295,7 @@ class Analysis(object):
 			self.errorsTrain[epoch] = best_train_loss
 			self.errorsValidation[epoch] = best_validation_loss
 			self.epoch = epoch
-			
+
 		end_time = time.clock()
 		print(('Optimization complete with best validation score of %f %%,'
 			   'with test performance %f %%') %
@@ -326,6 +327,7 @@ class Analysis(object):
 		predict = theano.function(
 			inputs=[self.classifier.input], 
 			outputs=self.classifier.p_y_given_x)
+		
 		return predict(np.asarray(xs, dtype=theano.config.floatX))[:,1]	
 
 	def calculateAMS(self, scores):
