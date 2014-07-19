@@ -10,8 +10,7 @@ analysis = Analysis(xs)
 #analysis.train(learning_rate=0.004, L1_reg=0.00, L2_reg=0.0005, 
 #			   n_epochs=50, batch_size=50, n_hidden=250)
 
-analysis.train_SdA(finetune_lr=0.1, pretraining_epochs=15,
-	pretrain_lr=0.001, training_epochs=1000, batch_size=1)
+analysis.train_SdA()
 
 scores = analysis.getTestScores()  
 print ("Training completed, test scores: " , scores.shape)

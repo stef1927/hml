@@ -138,7 +138,6 @@ class Analysis(object):
 		best_validation_loss = np.inf
 		best_train_loss = np.inf
 		best_iter = 0
-		test_score = 0.
 		start_time = time.clock()
 
 		self.epoch = 0
@@ -190,22 +189,22 @@ class Analysis(object):
 		end_time = time.clock()
 		print(('Optimization complete. Best validation score of %f %% '
 			   'obtained at iteration %i, with test performance %f %%') %
-			  (best_validation_loss * 100., best_iter + 1, test_score * 100.))
+			  (best_validation_loss * 100., best_iter + 1, best_test_loss * 100.))
 		print >> sys.stderr, ('The code ran for %.2fm' % ((end_time - start_time) / 60.))
 
 	
 	""" Train a stochastic denoising autoencoder """
-	def train_SdA(finetune_lr=0.1, pretraining_epochs=15,
+	def train_SdA(self, finetune_lr=0.1, pretraining_epochs=15,
 			 pretrain_lr=0.001, training_epochs=1000, batch_size=1):
 		
 		n_train_batches = self.train_set_x.get_value(borrow=True).shape[0]
 		n_train_batches /= batch_size
 
-		numpy_rng = numpy.random.RandomState(89677)
+		numpy_rng = np.random.RandomState(89677)
 		print '... building the model'
 
 		sda = SdA(numpy_rng=numpy_rng, n_ins=self.xs.numFeatures,
-				  hidden_layers_sizes=[500, 500, 500],
+				  hidden_layers_sizes=[100],
 				  n_outs=2)
 
 		print '... getting the pretraining functions'
@@ -227,13 +226,14 @@ class Analysis(object):
 							 corruption=corruption_levels[i],
 							 lr=pretrain_lr))
 				print 'Pre-training layer %i, epoch %d, cost ' % (i, epoch),
-				print numpy.mean(c)
+				print np.mean(c)
 
 		end_time = time.clock()
 
 		print '... getting the finetuning functions'
-		train_fn, train_score, validate_score, test_score = sda.build_finetune_functions(
-					datasets=datasets, batch_size=batch_size, learning_rate=finetune_lr)
+		train_fn, train_score_fn, validate_score_fn, test_score_fn = \
+			sda.build_finetune_functions(
+			datasets=self.datasets, batch_size=batch_size, learning_rate=finetune_lr)
 
 		print '... finetunning the model'
 		patience = 10 * n_train_batches 
@@ -243,13 +243,12 @@ class Analysis(object):
 		validation_frequency = min(n_train_batches, patience / 2)
 
 		best_params = None
-		best_validation_loss = numpy.inf
-		best_train_loss = numpy.inf
-		test_score = 0.
+		best_validation_loss = np.inf
+		best_train_loss = np.inf
 		start_time = time.clock()
 
-		self.errorsTrain = np.zeros((n_epochs+1))
-		self.errorsValidation = np.zeros((n_epochs+1))    
+		self.errorsTrain = np.zeros((training_epochs+1))
+		self.errorsValidation = np.zeros((training_epochs+1))    
 
 		done_looping = False
 		epoch = 0
@@ -261,8 +260,8 @@ class Analysis(object):
 				iter = (epoch - 1) * n_train_batches + minibatch_index
 
 				if (iter + 1) % validation_frequency == 0:
-					validation_losses = validate_score()
-					this_validation_loss = numpy.mean(validation_losses)
+					validation_losses = validate_score_fn()
+					this_validation_loss = np.mean(validation_losses)
 					print('epoch %i, minibatch %i/%i, validation error %f %%' %
 						  (epoch, minibatch_index + 1, n_train_batches,
 						   this_validation_loss * 100.))
@@ -275,10 +274,10 @@ class Analysis(object):
 
 						best_validation_loss = this_validation_loss
 
-						train_losses = train_score()
+						train_losses = train_score_fn()
 						best_train_loss = np.mean(train_losses)
 						
-						test_losses = test_score()
+						test_losses = test_score_fn()
 						best_test_loss = np.mean(test_losses)
 						
 						best_iter = iter
@@ -292,13 +291,14 @@ class Analysis(object):
 					done_looping = True
 					break
 
-			self.errorsTrain[self.epoch] = best_train_loss
-			self.errorsValidation[self.epoch] = best_validation_loss
-
+			self.errorsTrain[epoch] = best_train_loss
+			self.errorsValidation[epoch] = best_validation_loss
+			self.epoch = epoch
+			
 		end_time = time.clock()
 		print(('Optimization complete with best validation score of %f %%,'
 			   'with test performance %f %%') %
-				(best_validation_loss * 100., test_score * 100.))
+				(best_validation_loss * 100., best_test_loss * 100.))
 		
 		print >> sys.stderr, ('The training code ran for %.2fm' % 
 			((end_time - start_time) / 60.))

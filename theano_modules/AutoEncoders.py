@@ -10,6 +10,8 @@ import theano
 import theano.tensor as T
 from theano.tensor.shared_randomstreams import RandomStreams
 
+from theano_modules.LogisticRegression import LogisticRegression
+from theano_modules.HiddenLayer import HiddenLayer
 
 """
  Denoising autoencoders are the building blocks for SdA (stacked denoising 
@@ -60,19 +62,19 @@ class dA(object):
 			# 4*sqrt(6./(n_hidden+n_visible))the output of uniform if
 			# converted using asarray to dtype
 			# theano.config.floatX so that the code is runable on GPU
-			initial_W = numpy.asarray(numpy_rng.uniform(
-					  low=-4 * numpy.sqrt(6. / (n_hidden + n_visible)),
-					  high=4 * numpy.sqrt(6. / (n_hidden + n_visible)),
+			initial_W = np.asarray(numpy_rng.uniform(
+					  low=-4 * np.sqrt(6. / (n_hidden + n_visible)),
+					  high=4 * np.sqrt(6. / (n_hidden + n_visible)),
 					  size=(n_visible, n_hidden)), dtype=theano.config.floatX)
 			W = theano.shared(value=initial_W, name='W', borrow=True)
 
 		if not bvis:
-			bvis = theano.shared(value=numpy.zeros(n_visible,
+			bvis = theano.shared(value=np.zeros(n_visible,
 								 dtype=theano.config.floatX),
 								 borrow=True)
 
 		if not bhid:
-			bhid = theano.shared(value=numpy.zeros(n_hidden,
+			bhid = theano.shared(value=np.zeros(n_hidden,
 								 dtype=theano.config.floatX),
 								 name='b',
 								 borrow=True)
@@ -356,7 +358,7 @@ class SdA(object):
 					  name='test')
 
 		def train_score():
-			return [train_score_i(i)] for i in xrange(n_train_batches)]
+			return [train_score_i(i) for i in xrange(n_train_batches)]
 
 		def valid_score():
 			return [valid_score_i(i) for i in xrange(n_valid_batches)]
