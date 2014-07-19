@@ -15,6 +15,8 @@ import theano.tensor as T
 from theano_modules.LogisticRegression import LogisticRegression
 from theano_modules.HiddenLayer import HiddenLayer
 from theano_modules.MLP import MLP
+from theano_modules.AutoEncoders import dA
+from theano_modules.AutoEncoders import SdA
 
 """ Functions that load the dataset into shared variables
 
@@ -46,11 +48,13 @@ class Analysis(object):
 		self.valid_set_x, self.valid_set_y = shared_dataset(xs.validation, xs.labelsValidation)
 		self.test_set_x,  self.test_set_y = shared_dataset(xs.test, xs.labelsTest)
 
+		self.datasets = [ (self.train_set_x, self.train_set_y), 
+						  (self.valid_set_x, self.valid_set_y), 
+						  (self.test_set_x, self.test_set_y) ]
 		self.xs = xs
 
-	""" Train a neural net via stochastic gradient descent """
-	def train(self, learning_rate=0.01, L1_reg=0.00, L2_reg=0.0001, 
-					n_epochs=1000, batch_size=20, n_hidden=500):
+	""" Train a MLP via stochastic gradient descent """
+	def train(self, learning_rate=0.01, L1_reg=0.00, L2_reg=0.0001, n_epochs=1000, batch_size=20, n_hidden=500):
 		
 		# compute number of minibatches for training, validation and testing
 		n_train_batches = self.train_set_x.get_value(borrow=True).shape[0] / batch_size
@@ -188,6 +192,116 @@ class Analysis(object):
 			   'obtained at iteration %i, with test performance %f %%') %
 			  (best_validation_loss * 100., best_iter + 1, test_score * 100.))
 		print >> sys.stderr, ('The code ran for %.2fm' % ((end_time - start_time) / 60.))
+
+	
+	""" Train a stochastic denoising autoencoder """
+	def train_SdA(finetune_lr=0.1, pretraining_epochs=15,
+			 pretrain_lr=0.001, training_epochs=1000, batch_size=1):
+		
+		n_train_batches = self.train_set_x.get_value(borrow=True).shape[0]
+		n_train_batches /= batch_size
+
+		numpy_rng = numpy.random.RandomState(89677)
+		print '... building the model'
+
+		sda = SdA(numpy_rng=numpy_rng, n_ins=self.xs.numFeatures,
+				  hidden_layers_sizes=[500, 500, 500],
+				  n_outs=2)
+
+		print '... getting the pretraining functions'
+		pretraining_fns = sda.pretraining_functions(train_set_x=self.train_set_x,
+													batch_size=batch_size)
+
+		print '... pre-training the model'
+		start_time = time.clock()
+
+		## Pre-train layer-wise
+		corruption_levels = [.1, .2, .3]
+		for i in xrange(sda.n_layers):
+			# go through pretraining epochs
+			for epoch in xrange(pretraining_epochs):
+				# go through the training set
+				c = []
+				for batch_index in xrange(n_train_batches):
+					c.append(pretraining_fns[i](index=batch_index,
+							 corruption=corruption_levels[i],
+							 lr=pretrain_lr))
+				print 'Pre-training layer %i, epoch %d, cost ' % (i, epoch),
+				print numpy.mean(c)
+
+		end_time = time.clock()
+
+		print '... getting the finetuning functions'
+		train_fn, train_score, validate_score, test_score = sda.build_finetune_functions(
+					datasets=datasets, batch_size=batch_size, learning_rate=finetune_lr)
+
+		print '... finetunning the model'
+		patience = 10 * n_train_batches 
+		patience_increase = 2. 
+		improvement_threshold = 0.995  
+
+		validation_frequency = min(n_train_batches, patience / 2)
+
+		best_params = None
+		best_validation_loss = numpy.inf
+		best_train_loss = numpy.inf
+		test_score = 0.
+		start_time = time.clock()
+
+		self.errorsTrain = np.zeros((n_epochs+1))
+		self.errorsValidation = np.zeros((n_epochs+1))    
+
+		done_looping = False
+		epoch = 0
+
+		while (epoch < training_epochs) and (not done_looping):
+			epoch = epoch + 1
+			for minibatch_index in xrange(n_train_batches):
+				minibatch_avg_cost = train_fn(minibatch_index)
+				iter = (epoch - 1) * n_train_batches + minibatch_index
+
+				if (iter + 1) % validation_frequency == 0:
+					validation_losses = validate_score()
+					this_validation_loss = numpy.mean(validation_losses)
+					print('epoch %i, minibatch %i/%i, validation error %f %%' %
+						  (epoch, minibatch_index + 1, n_train_batches,
+						   this_validation_loss * 100.))
+
+					if this_validation_loss < best_validation_loss:
+
+						if (this_validation_loss < best_validation_loss *
+							improvement_threshold):
+							patience = max(patience, iter * patience_increase)
+
+						best_validation_loss = this_validation_loss
+
+						train_losses = train_score()
+						best_train_loss = np.mean(train_losses)
+						
+						test_losses = test_score()
+						best_test_loss = np.mean(test_losses)
+						
+						best_iter = iter
+
+						print(('     epoch %i, minibatch %i/%i, test error of '
+							   'best model %f %%') %
+							  (epoch, minibatch_index + 1, n_train_batches,
+							   best_test_loss * 100.))
+
+				if patience <= iter:
+					done_looping = True
+					break
+
+			self.errorsTrain[self.epoch] = best_train_loss
+			self.errorsValidation[self.epoch] = best_validation_loss
+
+		end_time = time.clock()
+		print(('Optimization complete with best validation score of %f %%,'
+			   'with test performance %f %%') %
+				(best_validation_loss * 100., test_score * 100.))
+		
+		print >> sys.stderr, ('The training code ran for %.2fm' % 
+			((end_time - start_time) / 60.))
 
 	def plotErrors(self):	
 		fig = plt.figure()
