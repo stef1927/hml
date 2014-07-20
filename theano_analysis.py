@@ -32,6 +32,10 @@ def shared_dataset(data_x, data_y, borrow=True):
 	shared_y = theano.shared(np.asarray(data_y, dtype=theano.config.floatX), borrow=borrow)
 	return shared_x, T.cast(shared_y, 'int32')
 
+def shared_dataset_x(data_x, borrow=True):
+	shared_x = theano.shared(np.asarray(data_x, dtype=theano.config.floatX), borrow=borrow)
+	return shared_x
+
 """ Calculate the AMS"""
 def AMS(s,b):
 	assert s >= 0
@@ -52,150 +56,10 @@ class Analysis(object):
 						  (self.valid_set_x, self.valid_set_y), 
 						  (self.test_set_x, self.test_set_y) ]
 		self.xs = xs
-
-	""" Train a MLP via stochastic gradient descent """
-	def train(self, learning_rate=0.01, L1_reg=0.00, L2_reg=0.0001, n_epochs=1000, batch_size=20, n_hidden=500):
-		
-		# compute number of minibatches for training, validation and testing
-		n_train_batches = self.train_set_x.get_value(borrow=True).shape[0] / batch_size
-		n_valid_batches = self.valid_set_x.get_value(borrow=True).shape[0] / batch_size
-		n_test_batches = self.test_set_x.get_value(borrow=True).shape[0] / batch_size
-
-		print('Building the model, num train batches %i, num valid batches %i' % (n_train_batches, n_valid_batches));
-
-		index = T.lscalar()  
-		x = T.matrix('x')  
-		y = T.ivector('y')  
-
-		rng = np.random.RandomState(1234)
-
-		self.classifier = MLP(rng=rng, input=x, n_in=self.xs.numFeatures, 
-							  n_hidden=n_hidden, n_out=2)
-
-		cost = self.classifier.negative_log_likelihood(y) \
-			 + L1_reg * self.classifier.L1 \
-			 + L2_reg * self.classifier.L2_sqr
-
-		# classification errors
-		test_error_model = theano.function(inputs=[index],
-				outputs=self.classifier.errors(y),
-				givens={
-					x: self.test_set_x[index * batch_size:(index + 1) * batch_size],
-					y: self.test_set_y[index * batch_size:(index + 1) * batch_size]})
-
-		validate_error_model = theano.function(inputs=[index],
-				outputs=self.classifier.errors(y),
-				givens={
-					x: self.valid_set_x[index * batch_size:(index + 1) * batch_size],
-					y: self.valid_set_y[index * batch_size:(index + 1) * batch_size]})
-		
-		train_error_model = theano.function(inputs=[index],
-				outputs=self.classifier.errors(y),
-				givens={
-					x: self.train_set_x[index * batch_size:(index + 1) * batch_size],
-					y: self.train_set_y[index * batch_size:(index + 1) * batch_size]})	
-			
-		# compute the gradient of cost with respect to theta (sotred in params)
-		# the resulting gradients will be stored in a list gparams
-		gparams = []
-		for param in self.classifier.params:
-			gparam = T.grad(cost, param)
-			gparams.append(gparam)
-
-		# specify how to update the parameters of the model as a list of
-		# (variable, update expression) pairs
-		updates = []
-		# given two list the zip A = [a1, a2, a3, a4] and B = [b1, b2, b3, b4] of
-		# same length, zip generates a list C of same size, where each element
-		# is a pair formed from the two lists :
-		#    C = [(a1, b1), (a2, b2), (a3, b3), (a4, b4)]
-		for param, gparam in zip(self.classifier.params, gparams):
-			updates.append((param, param - learning_rate * gparam))
-
-		# compiling a Theano function `train_model` that returns the cost, but
-		# in the same time updates the parameter of the model based on the rules
-		# defined in `updates`
-		train_model = theano.function(inputs=[index], outputs=cost,
-				updates=updates,
-				givens={
-					x: self.train_set_x[index * batch_size:(index + 1) * batch_size],
-					y: self.train_set_y[index * batch_size:(index + 1) * batch_size]})
-
-		print '... training'
-
-		# early-stopping parameters
-		patience = 20000  # look as this many examples regardless
-		patience_increase = 2  # wait this much longer when a new best is found
-		improvement_threshold = 0.995  # a relative improvement of this much is considered significant
-		validation_frequency = min(n_train_batches, patience / 2)
-									  # go through this many
-									  # minibatche before checking the network
-									  # on the validation set; in this case we
-									  # check every epoch
-
-		best_params = None
-		best_test_loss = np.inf
-		best_validation_loss = np.inf
-		best_train_loss = np.inf
-		best_iter = 0
-		start_time = time.clock()
-
-		self.epoch = 0
-		done_looping = False
-		
-		self.errorsTrain = np.zeros((n_epochs+1))
-		self.errorsValidation = np.zeros((n_epochs+1))    
-
-		while (self.epoch < n_epochs) and (not done_looping):
-			self.epoch = self.epoch + 1
-			for minibatch_index in xrange(n_train_batches):
-
-				minibatch_avg_cost = train_model(minibatch_index)
-				# iteration number
-				iter = (self.epoch - 1) * n_train_batches + minibatch_index
-
-				if (iter + 1) % validation_frequency == 0:
-					# compute zero-one loss on validation set
-					validation_losses = [validate_error_model(i) for i in xrange(n_valid_batches)]
-					this_validation_loss = np.mean(validation_losses)
-
-					# if we got the best validation score until now
-					if this_validation_loss < best_validation_loss:
-						#improve patience if loss improvement is good enough
-						if this_validation_loss < best_validation_loss * improvement_threshold:
-							patience = max(patience, iter * patience_increase)
-
-						best_validation_loss = this_validation_loss
-						
-						train_losses = [train_error_model(i) for i in xrange(n_valid_batches)]
-						best_train_loss = np.mean(train_losses)
-						
-						test_losses = [test_error_model(i) for i in xrange(n_test_batches)]
-						
-						best_test_loss = np.mean(test_losses)
-						best_iter = iter
-
-					print('epoch %i, minibatch %i/%i, patience %i, iter %i, test error %f %%, valid error %f %%' %
-						 (self.epoch, minibatch_index + 1, n_train_batches, patience, iter, 
-						  best_test_loss * 100., best_validation_loss * 100.))     
-
-				if patience <= iter:
-					done_looping = True
-					break
-						
-			self.errorsTrain[self.epoch] = best_train_loss
-			self.errorsValidation[self.epoch] = best_validation_loss
-			
-		end_time = time.clock()
-		print(('Optimization complete. Best validation score of %f %% '
-			   'obtained at iteration %i, with test performance %f %%') %
-			  (best_validation_loss * 100., best_iter + 1, best_test_loss * 100.))
-		print >> sys.stderr, ('The code ran for %.2fm' % ((end_time - start_time) / 60.))
-
 	
 	""" Train a stochastic denoising autoencoder """
 	def train_SdA(self, finetune_lr=0.1, pretraining_epochs=15,
-			 pretrain_lr=0.001, training_epochs=1000, batch_size=1):
+			 pretrain_lr=0.001, training_epochs=75, batch_size=10):
 		
 		n_train_batches = self.train_set_x.get_value(borrow=True).shape[0]
 		n_train_batches /= batch_size
@@ -204,7 +68,7 @@ class Analysis(object):
 		print '... building the model'
 
 		self.classifier = SdA(numpy_rng=numpy_rng, n_ins=self.xs.numFeatures,
-				  hidden_layers_sizes=[500, 500, 500],
+				  hidden_layers_sizes=[100, 100],
 				  n_outs=2)
 
 		print '... getting the pretraining functions'
@@ -216,15 +80,13 @@ class Analysis(object):
 		start_time = time.clock()
 
 		## Pre-train layer-wise
-		corruption_levels = [.1, .2, .3]
+		corruption_level = .1
 		for i in xrange(self.classifier.n_layers):
-			# go through pretraining epochs
 			for epoch in xrange(pretraining_epochs):
-				# go through the training set
 				c = []
 				for batch_index in xrange(n_train_batches):
 					c.append(pretraining_fns[i](index=batch_index,
-							 corruption=corruption_levels[i],
+							 corruption=corruption_level,
 							 lr=pretrain_lr))
 				print 'Pre-training layer %i, epoch %d, cost ' % (i, epoch),
 				print np.mean(c)
@@ -237,15 +99,17 @@ class Analysis(object):
 			datasets=self.datasets, batch_size=batch_size, learning_rate=finetune_lr)
 
 		print '... finetunning the model'
-		patience = 10 * n_train_batches 
-		patience_increase = 2. 
-		improvement_threshold = 0.995  
+		patience = 10 * n_train_batches  
+		patience_increase = 1.5
+		improvement_threshold = 0.005  
 
 		validation_frequency = min(n_train_batches, patience / 2)
 
 		best_params = None
 		best_validation_loss = np.inf
 		best_train_loss = np.inf
+		best_ams = 0.
+		self.best_threshold = 0.
 		start_time = time.clock()
 
 		self.errorsTrain = np.zeros((training_epochs+1))
@@ -263,16 +127,8 @@ class Analysis(object):
 				if (iter + 1) % validation_frequency == 0:
 					validation_losses = validate_score_fn()
 					this_validation_loss = np.mean(validation_losses)
-					print('epoch %i, minibatch %i/%i, validation error %f %%' %
-						  (epoch, minibatch_index + 1, n_train_batches,
-						   this_validation_loss * 100.))
 
 					if this_validation_loss < best_validation_loss:
-
-						if (this_validation_loss < best_validation_loss *
-							improvement_threshold):
-							patience = max(patience, iter * patience_increase)
-
 						best_validation_loss = this_validation_loss
 
 						train_losses = train_score_fn()
@@ -281,12 +137,17 @@ class Analysis(object):
 						test_losses = test_score_fn()
 						best_test_loss = np.mean(test_losses)
 						
-						best_iter = iter
+						(amss, amss_max, threshold) = self.calculateAMS(self.getTestScores())
 
-						print(('     epoch %i, minibatch %i/%i, test error of '
-							   'best model %f %%') %
-							  (epoch, minibatch_index + 1, n_train_batches,
-							   best_test_loss * 100.))
+						if ((amss_max - best_ams) > improvement_threshold):
+							best_ams = amss_max
+							self.best_threshold = threshold
+							best_iter = iter
+							best_params = self.classifier.params
+							patience = max(patience, iter * patience_increase)
+
+					print('epoch %i, patience %i, iter %i, test %f %%, valid %f %%, AMS %f Threshold %f' %
+						(epoch, patience, iter, best_test_loss * 100., best_validation_loss * 100., amss_max, threshold))
 
 				if patience <= iter:
 					done_looping = True
@@ -297,9 +158,8 @@ class Analysis(object):
 			self.epoch = epoch
 
 		end_time = time.clock()
-		print(('Optimization complete with best validation score of %f %%,'
-			   'with test performance %f %%') %
-				(best_validation_loss * 100., best_test_loss * 100.))
+		print(('Optimization complete with best validation %f %%, test %f %%, ams %f, threshold %f') %
+				(best_validation_loss * 100., best_test_loss * 100., best_ams, self.best_threshold))
 		
 		print >> sys.stderr, ('The training code ran for %.2fm' % 
 			((end_time - start_time) / 60.))
@@ -321,39 +181,42 @@ class Analysis(object):
 		plt.show()
 
 	def getTestScores(self):
-		return self.getScores(self.xs.test)
+		return self.getScores(self.test_set_x)
 
 	def getScores(self, xs):
-		predict = theano.function(
-			inputs=[self.classifier.input], 
-			outputs=self.classifier.p_y_given_x)
-		
-		return predict(np.asarray(xs, dtype=theano.config.floatX))[:,1]	
+		return self.classifier.scores(xs)[:,1]
 
+	""" TODO: This works only on the test scores right now..."""
 	def calculateAMS(self, scores):
-		tIIs = scores.argsort()
+		sortedIndexes = scores.argsort()
 
 		s = np.sum(self.xs.weightsTest[self.xs.sSelectorTest])
 		b = np.sum(self.xs.weightsTest[self.xs.bSelectorTest])
-		amss = np.empty([len(tIIs)])
+		amss = np.empty([len(sortedIndexes)])
 		amsMax = 0
-		self.threshold = 0.0
+		threshold = 0.0
 		
-		for tI in range(len(tIIs)):
+		numPoints = len(sortedIndexes)
+		wFactor = 1. * self.xs.numPoints / numPoints
+		#print('Num points %f, Factor: %f' % (numPoints, wFactor))
+
+		for tI in range(numPoints):
 			# don't forget to renormalize the weights to the same sum 
 			# as in the complete training set
-			amss[tI] = AMS(max(0,s * self.xs.wFactor),max(0,b * self.xs.wFactor))
+			amss[tI] = AMS(max(0,s * wFactor),max(0,b * wFactor))
 			# careful with small regions, they fluctuate a lot
-			if tI < 0.9 * len(tIIs) and amss[tI] > amsMax:
+			if tI < 0.9 * numPoints and amss[tI] > amsMax:
 				amsMax = amss[tI]
-				self.threshold = scores[tIIs[tI]]
-				#print tI,self.threshold
-			if self.xs.sSelectorTest[tIIs[tI]]:
-				s -= self.xs.weightsTest[tIIs[tI]]
+				threshold = scores[sortedIndexes[tI]]
+		
+			if self.xs.sSelectorTest[sortedIndexes[tI]]:
+				s -= self.xs.weightsTest[sortedIndexes[tI]]
 			else:
-				b -= self.xs.weightsTest[tIIs[tI]]
+				b -= self.xs.weightsTest[sortedIndexes[tI]]
 
-		return amss
+		#print('Max AMS is %f, threshold %f' % (amsMax, threshold))
+
+		return (amss, amsMax, threshold)
 
 	def plotAMSvsRank(self, amss):
 		fig = plt.figure()
@@ -370,7 +233,7 @@ class Analysis(object):
 		plt.show()
 
 	def plotAMSvsScore(self, scores, amss):
-		tIIs = scores.argsort()
+		sortedIndexes = scores.argsort()
 
 		fig = plt.figure()
 		fig.suptitle('AMS curves', fontsize=14, fontweight='bold')
@@ -380,40 +243,43 @@ class Analysis(object):
 		vsScore.set_xlabel('score')
 		vsScore.set_ylabel('AMS')
 
-		vsScore.plot(scores[tIIs],amss,'b-')
-		vsScore.axis([scores[tIIs[0]], scores[tIIs[-1]] , 0, 4])
+		vsScore.plot(scores[sortedIndexes],amss,'b-')
+		vsScore.axis([scores[sortedIndexes[0]], scores[sortedIndexes[-1]] , 0, 4])
 
 		plt.show()    
 
 	def computeSubmission(self, xsTest, output_file):	
+		
+		subm_set_x = shared_dataset_x(xsTest.xs)
+		#scores = self.getScores(subm_set_x)
 
-		## We divide in batches to avoid out of memory errors, you can
-		## simply do scores = self.getScores(xsTest.xs) if you have sufficient
-		## memory in your GPU
-		num_batches = 20
+		## We divide in batches to avoid out of memory errors 
+		num_batches = 10
 		num_points = xsTest.numPoints / (num_batches * 1.0)
 		scores = np.empty([])
 		for i in range(num_batches):
-			start = i * num_points
-			end = ((i+1) * num_points)
+			start = int(i * num_points)
+			end = int((i+1) * num_points)
 			print(('Calculating test scores for batch %i, from %i to %i') % 
 				(i, start, end))
 
 			if i == 0:
-				scores = self.getScores(xsTest.xs[start : end,])
+				scores = self.getScores(subm_set_x[start : end,])
 			else:	
-				scores = np.append(scores, self.getScores(xsTest.xs[start : end,]))
+				scores = np.append(scores, self.getScores(subm_set_x[start : end,]))
+				
+		print "Finished calculating submission scores"
 
-		print "Num test scores:", scores.shape
-		print scores
+		sortedIndexes = scores.argsort()
 
-		testInversePermutation = scores.argsort()
-		testPermutation = list(testInversePermutation)
-		for tI,tII in zip(range(len(testInversePermutation)), testInversePermutation):
-			testPermutation[tII] = tI
+		rankOrder = list(sortedIndexes)
+		for tI,tII in zip(range(len(sortedIndexes)), sortedIndexes):
+			rankOrder[tII] = tI
 
-		submission = np.array([[str(xsTest.testIds[tI]),str(testPermutation[tI]+1),
-			's' if scores[tI] >= self.threshold else 'b'] for tI in range(len(xsTest.testIds))])
+		submission = np.array([[str(xsTest.testIds[tI]),str(rankOrder[tI]+1),
+			's' if scores[tI] >= self.best_threshold else 'b'] for tI in range(len(xsTest.testIds))])
 
 		submission = np.append([['EventId','RankOrder','Class']], submission, axis=0)
 		np.savetxt(output_file, submission, fmt='%s', delimiter=',')
+
+		print "FInished generating submission file"

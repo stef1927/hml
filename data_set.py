@@ -8,19 +8,20 @@ import csv
 import numpy as np
 import scipy as sci
 
-"""Perform feature scaling ((x - min) / (max - min)) * 100 
-	so that all features are between 0 and 100
-	missing values become -1.
+"""Perform feature scaling ((x - min) / (max - min)) 
+	so that all features are between 0 and 1
+	missing values become 0.
 """
 def normalize(inData, c1, c2):
 	ret = np.array([map(float, row[c1 : c2]) for row in inData])
+
 	ret[ret == -999.0] = np.nan
 
 	ret_min = np.nanmin(ret,0)
 	ret_max = np.nanmax(ret,0)
 
-	ret = ((ret - ret_min) / (ret_max - ret_min)) * 100
-	ret[np.isnan(ret)] = -1
+	ret = ((ret - ret_min) / (ret_max - ret_min))
+	ret[np.isnan(ret)] = 0
 	return ret
 
 class TrainingSet(object):
@@ -51,7 +52,6 @@ class TrainingSet(object):
 		numPointsTrain = int(self.numPoints*0.8)
 		numPointsValidation = (self.numPoints - numPointsTrain) / 2
 		numPointsTest = numPointsValidation
-		self.wFactor = 1.* self.numPoints / numPointsTest
 
 		print(('Num points training %d, validation %d, testing %d') %
 			  (numPointsTrain, numPointsValidation, numPointsTest))
@@ -75,10 +75,6 @@ class TrainingSet(object):
 		self.labelsValidation = self.labels[randomPermutation[numPointsTrain:numPointsTrain+numPointsValidation]]
 		self.labelsTest = self.labels[randomPermutation[numPointsTrain+numPointsValidation:]]
 
-		self.sumWeightsTrain = np.sum(self.weightsTrain)
-		self.sumSWeightsTrain = np.sum(self.weightsTrain[self.sSelectorTrain])
-		self.sumBWeightsTrain = np.sum(self.weightsTrain[self.bSelectorTrain])	
-
 
 class TestSet(object):
 	
@@ -88,4 +84,4 @@ class TestSet(object):
 
 		self.xs = normalize(self.all[1:], 1, 31)
 		(self.numPoints, self.numFeatures) = self.xs.shape
-		print "Test Set :", self.xs.shape
+		print "Finished reading test set :", self.xs.shape

@@ -241,9 +241,6 @@ class SdA(object):
 
 		self.errors = self.logLayer.errors(self.y)
 
-		self.p_y_given_x = self.logLayer.p_y_given_x
-
-		self.input = self.x
 
 	''' Generates a list of functions, each of them implementing one
 		step in trainnig the dA corresponding to the layer with same index.
@@ -287,24 +284,12 @@ class SdA(object):
 
 		return pretrain_fns
 
-	''' Generates a function `train` that implements one step of
-		finetuning, a function `validate` that computes the error on
-		a batch from the validation set, and a function `test` that
-		computes the error on a batch from the testing set
+	def scores(self, output_set_x):
+		score_fn = theano.function(inputs=[], 
+			outputs=self.logLayer.p_y_given_x,
+			givens={self.x: output_set_x})
+		return score_fn()
 
-		:type datasets: list of pairs of theano.tensor.TensorType
-		:param datasets: It is a list that contain all the datasets;
-						 the has to contain three pairs, `train`,
-						 `valid`, `test` in this order, where each pair
-						 is formed of two Theano variables, one for the
-						 datapoints, the other for the labels
-
-		:type batch_size: int
-		:param batch_size: size of a minibatch
-
-		:type learning_rate: float
-		:param learning_rate: learning rate used during finetune stage
-	'''
 	def build_finetune_functions(self, datasets, batch_size, learning_rate):
 		(train_set_x, train_set_y) = datasets[0]
 		(valid_set_x, valid_set_y) = datasets[1]
