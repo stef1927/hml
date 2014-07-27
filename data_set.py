@@ -8,9 +8,13 @@ import csv
 import numpy as np
 import scipy as sci
 
+from sklearn import preprocessing
+
 """Perform feature scaling ((x - min) / (max - min)) 
 	so that all features are between 0 and 1
 	missing values become 0.
+
+	Labels are converted to 1 and -1.
 """
 def normalize(inData, c1, c2):
 	ret = np.array([map(float, row[c1 : c2]) for row in inData])
@@ -20,8 +24,13 @@ def normalize(inData, c1, c2):
 	ret_min = np.nanmin(ret,0)
 	ret_max = np.nanmax(ret,0)
 
-	ret = ((ret - ret_min) / (ret_max - ret_min))
+	ret = ((ret - ret_min) / (ret_max - ret_min)) * 100 + 0.0000001
 	ret[np.isnan(ret)] = 0
+	#print ret
+
+	#return ret
+	ret = preprocessing.scale(ret)
+	#print ret
 	return ret
 
 class TrainingSet(object):
@@ -29,51 +38,18 @@ class TrainingSet(object):
 	def __init__(self, file_name):
 		self.all = list(csv.reader(open(file_name,"rb"), delimiter=','))
 
+		self.nLabel = 0.0
+		self.pLabel = 1.0
+
 		self.weights = np.array([float(row[-2]) for row in self.all[1:]])
-		self.labels = np.array([map(lambda l: 1.0 if l == 's' else 0.0, row[-1]) for row in self.all[1:]]).flatten()
+		self.labels = np.array([map(lambda l: self.pLabel if l == 's' else self.nLabel, row[-1]) 
+			for row in self.all[1:]]).flatten()
 
-		self.xs = normalize(self.all[1:], 1, -2)
-		(self.numPoints, self.numFeatures) = self.xs.shape
-		print "Training Set :", self.xs.shape
+		self.data = normalize(self.all[1:], 1, 31)
+		#self.data = normalize(self.all[1:], 14, 31) # Primary only
 
-	""" Split data set into training, validation and test"""	
-	def split(self): 
-		sIndexes = self.labels == 1.0
-		bIndexes = self.labels == 0.0
-
-		self.sumWeights = np.sum(self.weights)
-		self.sumSWeights = np.sum(self.weights[sIndexes])
-		self.sumBWeights = np.sum(self.weights[bIndexes])
-
-		randomPermutation = random.sample(range(len(self.xs)), len(self.xs))
-		#np.savetxt("randomPermutation.csv",randomPermutation,fmt='%d',delimiter=',')
-		#randomPermutation = np.array(map(int,np.array(list(csv.reader(open("randomPermutation.csv","rb"), delimiter=','))).flatten()))
-
-		numPointsTrain = int(self.numPoints*0.8)
-		numPointsValidation = (self.numPoints - numPointsTrain) / 2
-		numPointsTest = numPointsValidation
-
-		print(('Num points training %d, validation %d, testing %d') %
-			  (numPointsTrain, numPointsValidation, numPointsTest))
-
-		self.train = self.xs[randomPermutation[:numPointsTrain]]
-		self.validation = self.xs[randomPermutation[numPointsTrain:numPointsTrain+numPointsValidation]]
-		self.test = self.xs[randomPermutation[numPointsTrain+numPointsValidation:]]
-
-		self.sSelectorTrain = sIndexes[randomPermutation[:numPointsTrain]]
-		self.bSelectorTrain = bIndexes[randomPermutation[:numPointsTrain]]
-		self.sSelectorValidation = sIndexes[randomPermutation[numPointsTrain:numPointsTrain+numPointsValidation]]
-		self.bSelectorValidation = bIndexes[randomPermutation[numPointsTrain:numPointsTrain+numPointsValidation]]
-		self.sSelectorTest = sIndexes[randomPermutation[numPointsTrain+numPointsValidation:]]
-		self.bSelectorTest = bIndexes[randomPermutation[numPointsTrain+numPointsValidation:]]
-
-		self.weightsTrain = self.weights[randomPermutation[:numPointsTrain]]
-		self.weightsValidation = self.weights[randomPermutation[numPointsTrain:numPointsTrain+numPointsValidation]]
-		self.weightsTest = self.weights[randomPermutation[numPointsTrain+numPointsValidation:]]
-
-		self.labelsTrain = self.labels[randomPermutation[:numPointsTrain]]
-		self.labelsValidation = self.labels[randomPermutation[numPointsTrain:numPointsTrain+numPointsValidation]]
-		self.labelsTest = self.labels[randomPermutation[numPointsTrain+numPointsValidation:]]
+		(self.numPoints, self.numFeatures) = self.data.shape
+		print "Finished reading training set :", self.data.shape
 
 
 class TestSet(object):
@@ -82,6 +58,8 @@ class TestSet(object):
 		self.all = list(csv.reader(open(file_name,"rb"), delimiter=','))
 		self.testIds = np.array([int(row[0]) for row in self.all[1:]])
 
-		self.xs = normalize(self.all[1:], 1, 31)
-		(self.numPoints, self.numFeatures) = self.xs.shape
-		print "Finished reading test set :", self.xs.shape
+		self.data = normalize(self.all[1:], 1, 31)
+		#self.data = normalize(self.all[1:], 14, 31) # Primary only
+
+		(self.numPoints, self.numFeatures) = self.data.shape
+		print "Finished reading test set :", self.data.shape

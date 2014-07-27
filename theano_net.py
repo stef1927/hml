@@ -36,14 +36,7 @@ def shared_dataset_x(data_x, borrow=True):
 	shared_x = theano.shared(np.asarray(data_x, dtype=theano.config.floatX), borrow=borrow)
 	return shared_x
 
-""" Calculate the AMS"""
-def AMS(s,b):
-	assert s >= 0
-	assert b >= 0
-	bReg = 10.
-	return math.sqrt(2 * ((s + b + bReg) * math.log(1 + s / (b + bReg)) - s))
-
-class Analysis(object):
+class TheanoNet(object):
 
 	def __init__(self, xs):
 		xs.split()
@@ -57,8 +50,14 @@ class Analysis(object):
 						  (self.test_set_x, self.test_set_y) ]
 		self.xs = xs
 	
-	""" Train a stochastic denoising autoencoder """
-	def train_SdA(self, finetune_lr=0.1, pretraining_epochs=15,
+	""" 
+		Train a stochastic denoising autoencoder 
+		TODO: get rid of cross validation and test data, get rid of AMS part
+			  just fit the model with some other convergence
+			  and move parameters to constructor
+			  and generally fit the interface of scikit learn
+	"""
+	def fit(self, finetune_lr=0.1, pretraining_epochs=15,
 			 pretrain_lr=0.001, training_epochs=75, batch_size=10):
 		
 		n_train_batches = self.train_set_x.get_value(borrow=True).shape[0]
@@ -180,106 +179,10 @@ class Analysis(object):
 
 		plt.show()
 
-	def getTestScores(self):
-		return self.getScores(self.test_set_x)
+	def scores(self):
+		#TODO
 
-	def getScores(self, xs):
+	def predict(self, xs):
 		return self.classifier.scores(xs)[:,1]
 
-	""" TODO: This works only on the test scores right now..."""
-	def calculateAMS(self, scores):
-		sortedIndexes = scores.argsort()
-
-		s = np.sum(self.xs.weightsTest[self.xs.sSelectorTest])
-		b = np.sum(self.xs.weightsTest[self.xs.bSelectorTest])
-		amss = np.empty([len(sortedIndexes)])
-		amsMax = 0
-		threshold = 0.0
-		
-		numPoints = len(sortedIndexes)
-		wFactor = 1. * self.xs.numPoints / numPoints
-		#print('Num points %f, Factor: %f' % (numPoints, wFactor))
-
-		for tI in range(numPoints):
-			# don't forget to renormalize the weights to the same sum 
-			# as in the complete training set
-			amss[tI] = AMS(max(0,s * wFactor),max(0,b * wFactor))
-			# careful with small regions, they fluctuate a lot
-			if tI < 0.9 * numPoints and amss[tI] > amsMax:
-				amsMax = amss[tI]
-				threshold = scores[sortedIndexes[tI]]
-		
-			if self.xs.sSelectorTest[sortedIndexes[tI]]:
-				s -= self.xs.weightsTest[sortedIndexes[tI]]
-			else:
-				b -= self.xs.weightsTest[sortedIndexes[tI]]
-
-		#print('Max AMS is %f, threshold %f' % (amsMax, threshold))
-
-		return (amss, amsMax, threshold)
-
-	def plotAMSvsRank(self, amss):
-		fig = plt.figure()
-		fig.suptitle('AMS curves', fontsize=14, fontweight='bold')
-		vsRank = fig.add_subplot(111)
-		fig.subplots_adjust(top=0.85)
-
-		vsRank.set_xlabel('rank')
-		vsRank.set_ylabel('AMS')
-
-		vsRank.plot(amss,'b-')
-		vsRank.axis([0,len(amss), 0, 4])
-
-		plt.show()
-
-	def plotAMSvsScore(self, scores, amss):
-		sortedIndexes = scores.argsort()
-
-		fig = plt.figure()
-		fig.suptitle('AMS curves', fontsize=14, fontweight='bold')
-		vsScore = fig.add_subplot(111)
-		fig.subplots_adjust(top=0.85)
-
-		vsScore.set_xlabel('score')
-		vsScore.set_ylabel('AMS')
-
-		vsScore.plot(scores[sortedIndexes],amss,'b-')
-		vsScore.axis([scores[sortedIndexes[0]], scores[sortedIndexes[-1]] , 0, 4])
-
-		plt.show()    
-
-	def computeSubmission(self, xsTest, output_file):	
-		
-		subm_set_x = shared_dataset_x(xsTest.xs)
-		#scores = self.getScores(subm_set_x)
-
-		## We divide in batches to avoid out of memory errors 
-		num_batches = 10
-		num_points = xsTest.numPoints / (num_batches * 1.0)
-		scores = np.empty([])
-		for i in range(num_batches):
-			start = int(i * num_points)
-			end = int((i+1) * num_points)
-			print(('Calculating test scores for batch %i, from %i to %i') % 
-				(i, start, end))
-
-			if i == 0:
-				scores = self.getScores(subm_set_x[start : end,])
-			else:	
-				scores = np.append(scores, self.getScores(subm_set_x[start : end,]))
-				
-		print "Finished calculating submission scores"
-
-		sortedIndexes = scores.argsort()
-
-		rankOrder = list(sortedIndexes)
-		for tI,tII in zip(range(len(sortedIndexes)), sortedIndexes):
-			rankOrder[tII] = tI
-
-		submission = np.array([[str(xsTest.testIds[tI]),str(rankOrder[tI]+1),
-			's' if scores[tI] >= self.best_threshold else 'b'] for tI in range(len(xsTest.testIds))])
-
-		submission = np.append([['EventId','RankOrder','Class']], submission, axis=0)
-		np.savetxt(output_file, submission, fmt='%s', delimiter=',')
-
-		print "FInished generating submission file"
+	

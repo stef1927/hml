@@ -10,20 +10,25 @@ import numpy as np
 import scipy as sci
 import matplotlib.pyplot as plt
 
+from sklearn.preprocessing import StandardScaler
+#from sklearn.decomposition import PCA
+from sklearn.pipeline import Pipeline
+
 from sklearn.cross_validation import KFold
 from sklearn.cross_validation import ShuffleSplit
 from sklearn.externals import joblib
 
 #Classifiers
-from sklearn.linear_model import LogisticRegression
-from sklearn.decomposition import PCA
-from sklearn.pipeline import Pipeline
+from sklearn.linear_model import LogisticRegression, SGDClassifier
+from sklearn.neighbors import KNeighborsClassifier
+from sklearn.svm import SVC, LinearSVC
+from sklearn.ensemble import AdaBoostClassifier, GradientBoostingClassifier
+from sklearn.ensemble import ExtraTreesClassifier, RandomForestClassifier
+from sklearn.naive_bayes import GaussianNB
+from sklearn.lda import LDA
+from sklearn.qda import QDA
 
-from sklearn.svm import SVC
-from sklearn.svm import LinearSVC
-from sklearn.ensemble import AdaBoostClassifier
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.ensemble import GradientBoostingClassifier
+from xgboost_classifier import XgBoost
 
 def AMS(s,b):
 	assert s >= 0
@@ -39,65 +44,95 @@ class Analysis:
 		self.classifiers = [
 			#LogisticRegression(),
 			#LinearSVC(C=1, dual=False, verbose=0),
-			#AdaBoostClassifier(n_estimators=50),
-			#GradientBoostingClassifier(n_estimators=50, learning_rate=1.0, max_depth=1, random_state=0),
-			#RandomForestClassifier(n_estimators=10),
-			#RandomForestClassifier(n_estimators=50)
 
-			Pipeline(steps=[('pca', PCA()), ('classifier', LogisticRegression())]),
-			Pipeline(steps=[('pca', PCA()), ('classifier', AdaBoostClassifier(n_estimators=50))]),
-			Pipeline(steps=[('pca', PCA()), ('classifier', GradientBoostingClassifier(n_estimators=50))]),
-			Pipeline(steps=[('pca', PCA()), ('classifier', RandomForestClassifier(n_estimators=50))])
+			#SGDClassifier(loss="hinge", penalty="l2"),
+			#SGDClassifier(loss="log", penalty="l2"),
+			#SGDClassifier(loss="modified_huber", penalty="l2"),
+			
+			#KNeighborsClassifier(4),
+			#GaussianNB(),
+    		#LDA(),
+    		#QDA(),
+			
+			
+			ExtraTreesClassifier(n_estimators=50, n_jobs=-1),
+			RandomForestClassifier(n_estimators=25, n_jobs=-1),
+			XgBoost(num_round=60),	
+			
+			#Pipeline(steps=[
+			#	('step1', ExtraTreesClassifier(n_estimators=25, n_jobs=-1)), 
+			#	('step2', SGDClassifier(loss="log", penalty="l2"))]),
+
+			#RandomForestClassifier(n_estimators=25, n_jobs=-1),
+			#AdaBoostClassifier(n_estimators=25),
+			#GradientBoostingClassifier(n_estimators=25, learning_rate=1.0, max_depth=1, random_state=0),
+
+			#Pipeline(steps=[('pca', PCA()), ('classifier', LogisticRegression())]),
 		]
 
-	def evaluate(self):
-		#rs = KFold(self.xs.numPoints, n_folds=10, shuffle=true)
-		rs = ShuffleSplit(self.xs.numPoints, n_iter=5, test_size=.10, random_state=0)
+	def evaluate(self, n_iter=5):
+		rs = ShuffleSplit(self.xs.numPoints, n_iter=n_iter, test_size=.10, random_state=0)
 
 		best_ams = 0
+		amss = np.empty([n_iter])
+		thresholds = np.empty([n_iter])
+		scores = np.empty([n_iter])
 
 		for clf in self.classifiers:
 			print "===>", clf
+			i = 0
 			for train, test in rs:
 				x_train, y_train = self.xs.data[train], self.xs.labels[train]
 				x_test, y_test = self.xs.data[test], self.xs.labels[test]
 
+				start_time = time.clock()
 				clf.fit(x_train, y_train)
+				#print clf.classes_
+
+				scores[i] = clf.score(x_test, y_test) 
+				amss[i], thresholds[i] = self.calculateAMS(test, clf)
+
+				end_time = time.clock()
+
+				print(('Score %f, AMS max %f, threshold %f ran for %.2fs') % 
+					(scores[i], amss[i], thresholds[i], (end_time - start_time)));
 				
-				score = clf.score(x_test, y_test) 
-				amss, amsMax, t, scores = self.calculateAMS(test, clf)
+				i = i + 1
 
-				print(('Score %f, AMS max %f, threshold %f') % (score, amsMax, t));
-
-				if (amsMax > best_ams):
-					best_ams = amsMax
-					best_amss = amss
-					best_scores = scores
-
-					self.threshold = t
-					self.classifier = clf
+			ams = amss.mean() 
+			if (ams > best_ams):
+				best_ams = ams
+				self.threshold = thresholds.mean()
+				self.classifier = clf
+			
+			print(('Score %0.4f (+/- %0.4f), AMS %0.4f (+/- %0.4f), threshold %0.4f (+/- %0.4f)') % 
+				(scores.mean(), scores.std(), amss.mean(), amss.std(), thresholds.mean(), thresholds.std()));
 
 		print "Best AMS ", best_ams, "with ", self.classifier, "and threshold ", self.threshold	
-		return best_ams, best_amss, best_scores		
 
 	def train(self):
 		self.classifier.fit(self.xs.data, self.xs.labels)
+		self.calculateAMS(np.arange(self.xs.numPoints), self.classifier, True) 
 
 	def save(self):
-		joblib.dump(self.classifier, 'model.pkl') 
+		if hasattr(self.classifier, 'save'):
+			self.classifier.save('model.dmp')
+		else:	
+			joblib.dump(self.classifier, 'model.pkl') 
 
 	def load(self):
-		self.classifier = joblib.load('model.pkl') 
+		if hasattr(self.classifier, 'load'):
+			self.classifier.load('model.dmp')
+		else:	
+			self.classifier = joblib.load('model.pkl') 
 
 	def get_scores(self, data, clf):
-		#print clf.classes_
-		return clf.predict_proba(data)[:,1]
-		#return clf.decision_function(data)
+		if hasattr(clf, 'predict_proba'):
+			return clf.predict_proba(data)[:,1]
+		return clf.decision_function(data)
 
-	def calculateAMS(self, indexes, clf):
+	def calculateAMS(self, indexes, clf, plot=False):
 		scores = self.get_scores(self.xs.data[indexes], clf)
-		#print scores
-
 		sortedIndexes = scores.argsort()
 
 		labels = self.xs.labels[indexes]
@@ -131,8 +166,12 @@ class Analysis:
 			else:
 				b -= weights[sortedIndexes[tI]]
 
+		if plot:
+			self.plotAMSvsRank(amss)
+			self.plotAMSvsScore(scores, amss)
+		
 		#print('Max AMS is %f, threshold %f' % (amsMax, threshold))
-		return (amss, amsMax, threshold, scores)
+		return (amsMax, threshold)
 
 	def computeSubmission(self, xsTest, output_file):	
 		scores = self.get_scores(xsTest.data, self.classifier)
