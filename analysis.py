@@ -30,12 +30,6 @@ from sklearn.ensemble.partial_dependence import plot_partial_dependence
 
 from xgboost_classifier import XgBoost
 
-def AMS(s,b):
-	assert s >= 0
-	assert b >= 0
-	bReg = 10.
-	return math.sqrt(2 * ((s + b + bReg) * math.log(1 + s / (b + bReg)) - s))
-
 def getWeights(xs):
 	weights = xs.weights
 
@@ -52,12 +46,18 @@ class Analysis:
 
 	def __init__(self, xs):
 		self.xs = xs
+		
+		weights = getWeights(xs) 
+
+		num_features = 15
 
 		#self.transformer = ExtraTreesClassifier(n_estimators=50, n_jobs=-1)
 		#self.transformer = RBFSampler(gamma=1, random_state=1, n_components=10)
-		self.transformer = FeatureAgglomeration(n_clusters=10)
+		self.transformer = FeatureAgglomeration(n_clusters=num_features)
 
-		weights = getWeights(xs) #TODO - move in data_set?
+		self.classifier = GradientBoostingClassifier(n_estimators=25, max_depth=10, 
+			min_samples_leaf=500, max_features=num_features, verbose=1)
+
 		self.classifiers = [
 			LogisticRegression(),
 			LinearSVC(C=1, dual=False, class_weight=weights), 
@@ -66,27 +66,20 @@ class Analysis:
 			SGDClassifier(loss="log", penalty="l2"),
 			SGDClassifier(loss="modified_huber", penalty="l2"),
 
-			#GradientBoostingClassifier(n_estimators=75, max_depth=10, 
-			#	min_samples_leaf=500, max_features=10, verbose=1),
-
 			GradientBoostingClassifier(n_estimators=25, max_depth=10, 
-				min_samples_leaf=500, max_features=10, verbose=1),
+				min_samples_leaf=500, max_features=num_features, verbose=1),
 
 			RandomForestClassifier(n_estimators=25, n_jobs=2),
 			#XgBoost(num_round=25),	
 		]
 
-	def evaluate(self, n_iter=5):
-		rs = ShuffleSplit(self.xs.numPoints, n_iter=n_iter, test_size=.10, random_state=0)
 
-		best_ams = 0
-		amss = np.empty([n_iter])
-		thresholds = np.empty([n_iter])
-		scores = np.empty([n_iter])
+	def evaluate(self, n_iter=5):
 
 		self.labels = self.xs.labels
 		
 		if hasattr(self, 'transformer'):
+			print "Transforming data..."
 			self.data = self.transformer.fit_transform(self.xs.data, self.labels)
 
 			if hasattr(self.transformer, 'feature_importances_'):
@@ -96,7 +89,18 @@ class Analysis:
 			print "New shape :", self.data.shape
 		else:
 			self.data = self.xs.data
+		
+		if hasattr(self, 'classifier'):
+			print "Skipping evaluation, classifier alreday pre-selected"
+			return
 
+		best_ams = 0
+		best_threshold = 0
+		amss = np.empty([n_iter])
+		thresholds = np.empty([n_iter])
+		scores = np.empty([n_iter])
+
+		rs = ShuffleSplit(self.xs.numPoints, n_iter=n_iter, test_size=.10, random_state=0)
 		for clf in self.classifiers:
 			print "===>", clf
 			i = 0
@@ -121,7 +125,7 @@ class Analysis:
 			ams = amss.mean() 
 			if (ams > best_ams):
 				best_ams = ams
-				self.threshold = thresholds.mean()
+				best_threshold = thresholds.mean()
 				self.classifier = clf
 			
 			#fig, axs = plot_partial_dependence(clf, x_train, np.arange(self.data.shape[1]), n_cols=6) 
@@ -130,11 +134,13 @@ class Analysis:
 			print(('Score %0.4f (+/- %0.4f), AMS %0.4f (+/- %0.4f), threshold %0.4f (+/- %0.4f)') % 
 				(scores.mean(), scores.std(), amss.mean(), amss.std(), thresholds.mean(), thresholds.std()));
 
-		print "Best AMS ", best_ams, "with ", self.classifier, "and threshold ", self.threshold	
+		print "Best AMS ", best_ams, "with ", self.classifier, "and threshold ", best_threshold	
 
 	def train(self):
+		print "Training best classifier..."
+		print "===>", self.classifier
 		self.classifier.fit(self.data, self.labels)
-		self.calculateAMS(np.arange(self.xs.numPoints), self.classifier, True) 
+		ams, self.threshold = self.calculateAMS(np.arange(self.xs.numPoints), self.classifier, True) 
 
 	def save(self):
 		if hasattr(self.classifier, 'save'):
@@ -154,49 +160,52 @@ class Analysis:
 		return clf.decision_function(data)
 
 	def calculateAMS(self, indexes, clf, plot=False):
+		def AMS(s,b):
+			bReg = 10.
+			return math.sqrt(2 * ((s + b + bReg) * math.log(1 + s / (b + bReg)) - s))
+
 		scores = self.get_scores(self.data[indexes], clf)
-		sortedIndexes = scores.argsort()
+		threshold = np.percentile(scores, 85)
+		pred = scores >= threshold 
+
+		numPoints = len(scores)
 
 		labels = self.xs.labels[indexes]
 		weights = self.xs.weights[indexes]
 
-		sIndexes = labels == self.xs.pLabel
-		bIndexes = labels == self.xs.nLabel
+		sIndexes = labels == self.xs.pLabel # true positive
+		bIndexes = labels == self.xs.nLabel # true negative
 
-		s = np.sum(weights[sIndexes])
-		b = np.sum(weights[bIndexes])
-
-		amss = np.empty([len(sortedIndexes)])
-		amsMax = 0
-
-		#threshold = 0.0
-		threshold = np.percentile(scores, 85)
-		#print "Threshold :", threshold
-
-		numPoints = len(sortedIndexes)
+		s = 0
+		b = 0
 		wFactor = 1. * self.xs.numPoints / numPoints
-		#print('Num points %f, Factor: %f' % (numPoints, wFactor))
+		for i in range(numPoints):
+			if pred[i]:
+				if sIndexes[i]:
+					s += weights[i]	* wFactor
+				else:
+					b += weights[i] * wFactor
 
-		for tI in range(numPoints):
-			# don't forget to renormalize the weights to the same sum 
-			# as in the complete training set
-			amss[tI] = AMS(max(0,s * wFactor),max(0,b * wFactor))
-			# careful with small regions, they fluctuate a lot
-			if tI < 0.9 * numPoints and amss[tI] > amsMax:
-				amsMax = amss[tI]
-				#threshold = scores[sortedIndexes[tI]]
-		
-			if sIndexes[sortedIndexes[tI]]:
-				s -= weights[sortedIndexes[tI]]
-			else:
-				b -= weights[sortedIndexes[tI]]
+		ams = AMS(max(0, s), max(0, b))
 
 		if plot:
-			print('Max AMS is %f, threshold %f' % (amsMax, threshold))
+			s = b = 0
+			amss = np.empty([numPoints])
+			sortedIndexes = scores.argsort()
+			for tI in range(numPoints):
+				amss[tI] = AMS(max(0, s), max(0, b))
+		
+				if pred[sortedIndexes[tI]]:
+					if sIndexes[sortedIndexes[tI]]:
+						s += weights[sortedIndexes[tI]]
+					else:
+						b += weights[sortedIndexes[tI]]
+
+			print('AMS %f, threshold %f' % (ams, threshold))
 			self.plotAMSvsRank(amss)
 			self.plotAMSvsScore(scores, amss)
 		
-		return (amsMax, threshold)
+		return (ams, threshold)
 
 	def computeSubmission(self, xsTest, output_file):	
 		if hasattr(self, 'transformer'):
@@ -229,7 +238,7 @@ class Analysis:
 		vsRank.set_ylabel('AMS')
 
 		vsRank.plot(amss,'b-')
-		vsRank.axis([0,len(amss), 0, 4])
+		vsRank.axis([0,len(amss), 0, 4.0])
 
 		plt.show()
 
@@ -245,7 +254,7 @@ class Analysis:
 		vsScore.set_ylabel('AMS')
 
 		vsScore.plot(scores[sortedIndexes],amss,'b-')
-		vsScore.axis([scores[sortedIndexes[0]], scores[sortedIndexes[-1]] , 0, 4])
+		vsScore.axis([scores[sortedIndexes[0]], scores[sortedIndexes[-1]] , 0, 4.0])
 
 		plt.show()    
 	
