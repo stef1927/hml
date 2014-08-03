@@ -2,13 +2,13 @@ from data_set import TrainingSet, TestSet
 from analysis import Analysis
 
 print 'Loading training data....'
-#xs = TrainingSet("../data/training_sub_set_1.csv")
-xs = TrainingSet("../data/training.csv")
+xs = TrainingSet("../data/training_sub_set_1.csv")
+#xs = TrainingSet("../data/training.csv")
 
 analysis = Analysis(xs)
 
 print 'Evaluating....'
-analysis.evaluate(n_iter=5)
+analysis.evaluate()
 
 print 'Training...'
 analysis.train()
