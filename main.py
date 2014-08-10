@@ -7,8 +7,11 @@ xs = TrainingSet("../data/training.csv")
 
 analysis = Analysis(xs)
 
-print 'Evaluating....'
-analysis.evaluate()
+#print 'Searching....'
+#analysis.grid_search()
+
+#print 'Evaluating....'
+#analysis.evaluate()
 
 print 'Training...'
 analysis.train()

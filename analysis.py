@@ -5,142 +5,154 @@ import math
 import string
 import time
 
-
 import numpy as np
 import scipy as sci
 import matplotlib.pyplot as plt
 
+from sklearn.preprocessing import StandardScaler
 
 from sklearn.cross_validation import ShuffleSplit
 from sklearn.externals import joblib
 
-from sklearn.cluster import FeatureAgglomeration
-
-#Classifiers
 from sklearn.linear_model import LogisticRegression, SGDClassifier
-from sklearn.kernel_approximation import RBFSampler
-from sklearn.neighbors import KNeighborsClassifier
+from sklearn.kernel_approximation import Nystroem
 from sklearn.svm import SVC, LinearSVC
 
 from sklearn.tree import DecisionTreeClassifier
 from sklearn.ensemble import AdaBoostClassifier, GradientBoostingClassifier
 from sklearn.ensemble import ExtraTreesClassifier, RandomForestClassifier
-from sklearn.ensemble.partial_dependence import plot_partial_dependence
 
+from sklearn.grid_search import GridSearchCV
+from sklearn.metrics import classification_report
 
 from xgboost_classifier import XgBoost
-
-def getWeights(xs):
-	weights = xs.weights
-
-	pIndexes = xs.labels == xs.pLabel
-	nIndexes = xs.labels == xs.nLabel
-
-	w = np.sum(weights)
-	p = np.sum(weights[pIndexes])
-	n = np.sum(weights[nIndexes])
-	
-	return { xs.nLabel : n/w, xs.pLabel: p/w }
 
 class Analysis:
 
 	def __init__(self, xs):
+		np.random.seed(0)
 		self.xs = xs
 		
-		weights = getWeights(xs) 
-
-		num_features = 15
-
-		#self.transformer = ExtraTreesClassifier(n_estimators=50, n_jobs=-1)
-		#self.transformer = RBFSampler(gamma=1, random_state=1, n_components=10)
-		self.transformer = FeatureAgglomeration(n_clusters=num_features)
-
-		self.classifier = GradientBoostingClassifier(n_estimators=25, max_depth=10, 
-			min_samples_leaf=500, max_features=num_features, verbose=1)
-
-		self.classifiers = [
-			LogisticRegression(),
-			LinearSVC(C=1, dual=False, class_weight=weights), 
-
-			SGDClassifier(loss="hinge", penalty="l2"),
-			SGDClassifier(loss="log", penalty="l2"),
-			SGDClassifier(loss="modified_huber", penalty="l2"),
-
-			GradientBoostingClassifier(n_estimators=25, max_depth=10, 
-				min_samples_leaf=500, max_features=num_features, verbose=1),
-
-			RandomForestClassifier(n_estimators=25, n_jobs=2),
-			#XgBoost(num_round=25),	
+		self.transformers = [
+			StandardScaler(),
+			#Nystroem(kernel='rbf', n_components=150),
 		]
 
-
-	def evaluate(self, n_iter=5):
-
 		self.labels = self.xs.labels
+		self.weights = self.xs.weights
+		self.data = self.transform(self.xs.data, self.labels)		
+
+		#self.classifier = GradientBoostingClassifier(n_estimators=10)
+		#self.param_grid={'max_depth' : [5, 25, 50], 
+		#				 'min_samples_leaf' : [10, 100, 1000]}
+
+		self.n_estimators = 120
+		self.classifier = GradientBoostingClassifier(max_depth=25, min_samples_leaf=100, 
+			n_estimators=self.n_estimators, verbose=1)
+
+		#hinge for linear svm, log for logistic regression			
+		#self.classifier = SGDClassifier(loss="modified_huber", n_iter=100, 
+		#	penalty="l2", fit_intercept=True, verbose=0),
+
+		#base_estimator=DecisionTreeClassifier,
+		#self.classifier = AdaBoostClassifier(n_estimators=100, learning_rate=1.0),
 		
-		if hasattr(self, 'transformer'):
-			print "Transforming data..."
-			self.data = self.transformer.fit_transform(self.xs.data, self.labels)
+		#self.classifier = RandomForestClassifier(n_estimators=30, n_jobs=2),
+		#self.classifier = XgBoost(num_round=25),	
 
-			if hasattr(self.transformer, 'feature_importances_'):
-				print "Feature importances :", self.transformer.feature_importances_
-				print "Feature labels by importance :", \
-					self.xs.header[self.transformer.feature_importances_.argsort()[::-1]]
-			print "New shape :", self.data.shape
-		else:
-			self.data = self.xs.data
-		
-		if hasattr(self, 'classifier'):
-			print "Skipping evaluation, classifier alreday pre-selected"
-			return
 
-		best_ams = 0
-		best_threshold = 0
-		amss = np.empty([n_iter])
-		thresholds = np.empty([n_iter])
-		scores = np.empty([n_iter])
+	def transform(self, data, labels=None):
+		for trf in self.transformers:
+			if labels is not None: 
+				print "Fit transform ===>", trf
+				data = trf.fit_transform(data, labels)
+				print "New shape :", data.shape
+				#print "Mean : ", data.mean(axis=0), "Std : ", data.std(axis=0)
+			else:
+				print "Simple transform ===>", trf
+				data = trf.transform(data)
 
-		rs = ShuffleSplit(self.xs.numPoints, n_iter=n_iter, test_size=.10, random_state=0)
-		for clf in self.classifiers:
-			print "===>", clf
-			i = 0
-			for train, test in rs:
-				x_train, y_train = self.data[train], self.labels[train]
-				x_test, y_test = self.data[test], self.labels[test]
+		return data	
 
-				start_time = time.clock()
-				clf.fit(x_train, y_train)
-				#print clf.classes_
+	""" Purpose: to find the best hyper parameters """	
+	def grid_search(self, n_iter=5):
+		rs = ShuffleSplit(self.xs.numPoints, n_iter=1, test_size=.1, random_state=0)
+		train, test = rs.__iter__().next()
 
-				scores[i] = clf.score(x_test, y_test) 
-				amss[i], thresholds[i] = self.calculateAMS(test, clf)
+		x_train, y_train, w_train = self.data[train], self.labels[train], self.weights[train]
+		x_test, y_test = self.data[test], self.labels[test]
 
-				end_time = time.clock()
+		scores = ['precision', 'recall']
+		for score in scores:
+			print("# Tuning hyper-parameters for %s" % score)
 
-				print(('Score %f, AMS max %f, threshold %f ran for %.2fs') % 
-					(scores[i], amss[i], thresholds[i], (end_time - start_time)));
-				
-				i = i + 1
+			clf = GridSearchCV(self.classifier, self.param_grid, cv=2, 
+					scoring=score, verbose=3, n_jobs=2)
+			clf.fit(x_train, y_train)
 
-			ams = amss.mean() 
-			if (ams > best_ams):
-				best_ams = ams
-				best_threshold = thresholds.mean()
-				self.classifier = clf
+			print("Best parameters set found on development set:")
+			print(clf.best_estimator_)
+			print("Grid scores on development set:")
+			for params, mean_score, scores in clf.grid_scores_:
+				print("%0.3f (+/-%0.03f) for %r"
+					  % (mean_score, scores.std() / 2, params))
+
+			print("Detailed classification report:")
+			print("The model is trained on the full development set.")
+			print("The scores are computed on the full evaluation set.")
+			y_true, y_pred = y_test, clf.predict(x_test)
+			print(classification_report(y_true, y_pred))
+
+			test_ams, test_threshold = self.calculateAMS(test, clf.best_estimator_)
+			train_ams, train_threshold = self.calculateAMS(train, clf.best_estimator_)
+
+			print(('Test AMS %f, Train AMS %f') % (test_ams, train_ams))
+
+	""" Purpose: To determine when we start over-fitting """
+	def evaluate(self, n_iter=20):
+		test_amss = np.empty([n_iter])
+		train_amss = np.empty([n_iter])
+
+		i = 0
+		n_est = self.n_estimators
+		rs = ShuffleSplit(self.xs.numPoints, n_iter=n_iter, test_size=.1, random_state=0)
+		for train, test in rs:
+			x_train, y_train, w_train = self.data[train], self.labels[train], self.weights[train]
+			x_test, y_test = self.data[test], self.labels[test]
+
+			start_time = time.clock()
+
+			#print "Fitting ===> ", self.classifier
+			self.classifier.fit(x_train, y_train)
+
+			#print "Feature importances ===> ", self.classifier.feature_importances_
+
+			test_score = self.classifier.score(x_test, y_test) 
+			train_score = self.classifier.score(x_train, y_train) 
+
+			test_amss[i], test_threshold = self.calculateAMS(test, self.classifier)
+			train_amss[i], train_threshold = self.calculateAMS(train, self.classifier)
+
+			end_time = time.clock()
+
+			print(('Test score %f / AMS %f, Train score %f / AMS %f ran for %.2fs, N. Est %d') % 
+				(test_score, test_amss[i], train_score, train_amss[i], (end_time - start_time), n_est));
 			
-			#fig, axs = plot_partial_dependence(clf, x_train, np.arange(self.data.shape[1]), n_cols=6) 
-			#plt.show()
+			i = i + 1
+			n_est = n_est + 10
 
-			print(('Score %0.4f (+/- %0.4f), AMS %0.4f (+/- %0.4f), threshold %0.4f (+/- %0.4f)') % 
-				(scores.mean(), scores.std(), amss.mean(), amss.std(), thresholds.mean(), thresholds.std()));
+			self.classifier.set_params(n_estimators=n_est, warm_start=True)
+			
 
-		print "Best AMS ", best_ams, "with ", self.classifier, "and threshold ", best_threshold	
+		print(('AMS %0.4f (+/- %0.4f)') %  (test_amss.mean(), test_amss.std()))
 
+
+	""" Purpose: to train the best classifier with full data set """
 	def train(self):
-		print "Training best classifier..."
-		print "===>", self.classifier
 		self.classifier.fit(self.data, self.labels)
-		ams, self.threshold = self.calculateAMS(np.arange(self.xs.numPoints), self.classifier, True) 
+		ams, self.threshold = self.calculateAMS(np.arange(self.xs.numPoints), self.classifier) 
+		
+		print(('AMS %f, threshold %f') % (ams, self.threshold));
 
 	def save(self):
 		if hasattr(self.classifier, 'save'):
@@ -157,9 +169,10 @@ class Analysis:
 	def get_scores(self, data, clf):
 		if hasattr(clf, 'predict_proba'):
 			return clf.predict_proba(data)[:,1]
-		return clf.decision_function(data)
+		# Appendix B of http://jmlr.csail.mit.edu/papers/volume2/zhang02c/zhang02c.pdf	
+		return (np.clip(clf.decision_function(data), -1, 1) + 1) / 2  
 
-	def calculateAMS(self, indexes, clf, plot=False):
+	def calculateAMS(self, indexes, clf):
 		def AMS(s,b):
 			bReg = 10.
 			return math.sqrt(2 * ((s + b + bReg) * math.log(1 + s / (b + bReg)) - s))
@@ -170,7 +183,7 @@ class Analysis:
 
 		numPoints = len(scores)
 
-		labels = self.xs.labels[indexes]
+		labels = self.labels[indexes]
 		weights = self.xs.weights[indexes]
 
 		sIndexes = labels == self.xs.pLabel # true positive
@@ -187,32 +200,11 @@ class Analysis:
 					b += weights[i] * wFactor
 
 		ams = AMS(max(0, s), max(0, b))
-
-		if plot:
-			s = b = 0
-			amss = np.empty([numPoints])
-			sortedIndexes = scores.argsort()
-			for tI in range(numPoints):
-				amss[tI] = AMS(max(0, s), max(0, b))
-		
-				if pred[sortedIndexes[tI]]:
-					if sIndexes[sortedIndexes[tI]]:
-						s += weights[sortedIndexes[tI]]
-					else:
-						b += weights[sortedIndexes[tI]]
-
-			print('AMS %f, threshold %f' % (ams, threshold))
-			self.plotAMSvsRank(amss)
-			self.plotAMSvsScore(scores, amss)
-		
+	
 		return (ams, threshold)
 
 	def computeSubmission(self, xsTest, output_file):	
-		if hasattr(self, 'transformer'):
-			data = self.transformer.transform(xsTest.data)
-		else:
-			data = xsTest.data
-
+		data = self.transform(xsTest.data)
 		scores = self.get_scores(data, self.classifier)
 		sortedIndexes = scores.argsort()
 
@@ -227,34 +219,4 @@ class Analysis:
 		np.savetxt(output_file, submission, fmt='%s', delimiter=',')
 
 		print "Finished generating submission file"	
-
-	def plotAMSvsRank(self, amss):
-		fig = plt.figure()
-		fig.suptitle('AMS curves', fontsize=14, fontweight='bold')
-		vsRank = fig.add_subplot(111)
-		fig.subplots_adjust(top=0.85)
-
-		vsRank.set_xlabel('rank')
-		vsRank.set_ylabel('AMS')
-
-		vsRank.plot(amss,'b-')
-		vsRank.axis([0,len(amss), 0, 4.0])
-
-		plt.show()
-
-	def plotAMSvsScore(self, scores, amss):
-		sortedIndexes = scores.argsort()
-
-		fig = plt.figure()
-		fig.suptitle('AMS curves', fontsize=14, fontweight='bold')
-		vsScore = fig.add_subplot(111)
-		fig.subplots_adjust(top=0.85)
-
-		vsScore.set_xlabel('score')
-		vsScore.set_ylabel('AMS')
-
-		vsScore.plot(scores[sortedIndexes],amss,'b-')
-		vsScore.axis([scores[sortedIndexes[0]], scores[sortedIndexes[-1]] , 0, 4.0])
-
-		plt.show()    
 	
