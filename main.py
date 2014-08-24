@@ -11,7 +11,7 @@ analysis = Analysis(xs)
 #analysis.grid_search()
 
 #print 'Evaluating....'
-#analysis.evaluate()
+analysis.evaluate()
 
 print 'Training...'
 analysis.train()

@@ -46,7 +46,7 @@ class Analysis:
 		#self.param_grid={'max_depth' : [5, 25, 50], 
 		#				 'min_samples_leaf' : [10, 100, 1000]}
 
-		self.n_estimators = 120
+		self.n_estimators = 5
 		self.classifier = GradientBoostingClassifier(max_depth=25, min_samples_leaf=100, 
 			n_estimators=self.n_estimators, verbose=1)
 
@@ -139,7 +139,7 @@ class Analysis:
 				(test_score, test_amss[i], train_score, train_amss[i], (end_time - start_time), n_est));
 			
 			i = i + 1
-			n_est = n_est + 10
+			n_est = n_est + 1
 
 			self.classifier.set_params(n_estimators=n_est, warm_start=True)
 			
