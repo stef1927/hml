@@ -10,12 +10,18 @@ import scipy as sci
 import matplotlib.pyplot as plt
 
 from sklearn.preprocessing import StandardScaler
+from sklearn.preprocessing import PolynomialFeatures
+
+from sklearn.feature_selection import SelectKBest
+from sklearn.feature_selection import f_classif
+from sklearn.feature_selection import VarianceThreshold
+
+from sklearn.neural_network import BernoulliRBM
 
 from sklearn.cross_validation import ShuffleSplit
 from sklearn.externals import joblib
 
-from sklearn.linear_model import LogisticRegression, SGDClassifier
-from sklearn.kernel_approximation import Nystroem
+from sklearn.linear_model import SGDClassifier
 from sklearn.svm import SVC, LinearSVC
 
 from sklearn.tree import DecisionTreeClassifier
@@ -35,7 +41,19 @@ class Analysis:
 		
 		self.transformers = [
 			StandardScaler(),
-			#Nystroem(kernel='rbf', n_components=150),
+
+			#BernoulliRBM(n_components=2),
+
+			#VarianceThreshold(threshold=(.5 * (1 - .5))),
+
+			#LinearSVC(C=0.01, penalty="l1", dual=False),
+
+			SelectKBest(f_classif, k=14),
+			
+			#GradientBoostingClassifier(max_depth=25, max_features=15, min_samples_leaf=100, 
+			#	n_estimators=5, verbose=1),
+
+			#PolynomialFeatures(degree=2, include_bias=False, interaction_only=True)
 		]
 
 		self.labels = self.xs.labels
@@ -46,13 +64,15 @@ class Analysis:
 		#self.param_grid={'max_depth' : [5, 25, 50], 
 		#				 'min_samples_leaf' : [10, 100, 1000]}
 
-		self.n_estimators = 5
-		self.classifier = GradientBoostingClassifier(max_depth=25, min_samples_leaf=100, 
-			n_estimators=self.n_estimators, verbose=1)
+		#self.n_estimators = 5
+		#self.classifier = GradientBoostingClassifier(max_depth=25, min_samples_leaf=100, 
+		#	n_estimators=self.n_estimators, verbose=1)
 
-		#hinge for linear svm, log for logistic regression			
-		#self.classifier = SGDClassifier(loss="modified_huber", n_iter=100, 
-		#	penalty="l2", fit_intercept=True, verbose=0),
+		#self.classifier = SVC(kernel='rbf', C=1.0, probability=True)
+
+		#hinge for linear svm, log for logistic regression, modified_huber			
+		self.classifier = SGDClassifier(loss="log", n_iter=100, 
+			penalty="l2", fit_intercept=True, verbose=0)
 
 		#base_estimator=DecisionTreeClassifier,
 		#self.classifier = AdaBoostClassifier(n_estimators=100, learning_rate=1.0),
@@ -68,6 +88,13 @@ class Analysis:
 				data = trf.fit_transform(data, labels)
 				print "New shape :", data.shape
 				#print "Mean : ", data.mean(axis=0), "Std : ", data.std(axis=0)
+				#print data
+				if hasattr(trf, 'feature_importances_'):
+					print "Feature importances :", trf.feature_importances_
+					sortedIndexes = trf.feature_importances_.argsort()[::-1]
+					print sortedIndexes
+					print trf.feature_importances_[sortedIndexes]
+					print self.xs.header[sortedIndexes]
 			else:
 				print "Simple transform ===>", trf
 				data = trf.transform(data)
@@ -76,7 +103,7 @@ class Analysis:
 
 	""" Purpose: to find the best hyper parameters """	
 	def grid_search(self, n_iter=5):
-		rs = ShuffleSplit(self.xs.numPoints, n_iter=1, test_size=.1, random_state=0)
+		rs = ShuffleSplit(self.data.shape[0], n_iter=1, test_size=.1, random_state=0)
 		train, test = rs.__iter__().next()
 
 		x_train, y_train, w_train = self.data[train], self.labels[train], self.weights[train]
@@ -109,23 +136,18 @@ class Analysis:
 			print(('Test AMS %f, Train AMS %f') % (test_ams, train_ams))
 
 	""" Purpose: To determine when we start over-fitting """
-	def evaluate(self, n_iter=20):
+	def evaluate(self, n_iter=10):
 		test_amss = np.empty([n_iter])
 		train_amss = np.empty([n_iter])
 
 		i = 0
-		n_est = self.n_estimators
-		rs = ShuffleSplit(self.xs.numPoints, n_iter=n_iter, test_size=.1, random_state=0)
+		rs = ShuffleSplit(self.data.shape[0], n_iter=n_iter, test_size=.1, random_state=0)
 		for train, test in rs:
 			x_train, y_train, w_train = self.data[train], self.labels[train], self.weights[train]
 			x_test, y_test = self.data[test], self.labels[test]
 
 			start_time = time.clock()
-
-			#print "Fitting ===> ", self.classifier
 			self.classifier.fit(x_train, y_train)
-
-			#print "Feature importances ===> ", self.classifier.feature_importances_
 
 			test_score = self.classifier.score(x_test, y_test) 
 			train_score = self.classifier.score(x_train, y_train) 
@@ -135,14 +157,10 @@ class Analysis:
 
 			end_time = time.clock()
 
-			print(('Test score %f / AMS %f, Train score %f / AMS %f ran for %.2fs, N. Est %d') % 
-				(test_score, test_amss[i], train_score, train_amss[i], (end_time - start_time), n_est));
+			print(('Test score %f / AMS %f, Train score %f / AMS %f ran for %.2fs') % 
+				(test_score, test_amss[i], train_score, train_amss[i], (end_time - start_time)));
 			
-			i = i + 1
-			n_est = n_est + 1
-
-			self.classifier.set_params(n_estimators=n_est, warm_start=True)
-			
+			i = i + 1	
 
 		print(('AMS %0.4f (+/- %0.4f)') %  (test_amss.mean(), test_amss.std()))
 
@@ -150,7 +168,7 @@ class Analysis:
 	""" Purpose: to train the best classifier with full data set """
 	def train(self):
 		self.classifier.fit(self.data, self.labels)
-		ams, self.threshold = self.calculateAMS(np.arange(self.xs.numPoints), self.classifier) 
+		ams, self.threshold = self.calculateAMS(np.arange(self.data.shape[0]), self.classifier) 
 		
 		print(('AMS %f, threshold %f') % (ams, self.threshold));
 
@@ -179,7 +197,9 @@ class Analysis:
 
 		scores = self.get_scores(self.data[indexes], clf)
 		threshold = np.percentile(scores, 85)
+		
 		pred = scores >= threshold 
+		#pred = clf.predict(self.data[indexes])
 
 		numPoints = len(scores)
 

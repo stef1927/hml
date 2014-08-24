@@ -24,6 +24,15 @@ class TrainingSet(object):
 		self.data = np.array([map(float, row[1 : 31]) for row in self.all[1:]])
 		
 		(self.numPoints, self.numFeatures) = self.data.shape
+
+		#if percentage != 1.0:
+	    #	print "Reducing data to :", percentage
+		#	reducedNumPoints = self.numPoints * percentage 
+		#	selected_indexes = np.random.choice(self.numPoints, reducedNumPoints, replace=False)
+		#	self.data = self.data[selected_indexes,:]
+		#	self.weights = self.weights[selected_indexes]
+		#	self.labels = self.labels[selected_indexes]
+
 		print "Finished reading training set :", self.data.shape
 
 	def getWeights(self):

@@ -16,8 +16,8 @@ analysis.evaluate()
 print 'Training...'
 analysis.train()
 
-print 'Saving....'
-analysis.save()
+#print 'Saving....'
+#analysis.save()
 
 #analysis.load()
 
